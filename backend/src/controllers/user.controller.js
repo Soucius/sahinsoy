@@ -2,6 +2,7 @@ import User from "../models/User.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { ENV } from "../libs/env.js";
+import Role from "../models/Role.js";
 
 const generateToken = (id) => {
     return jwt.sign({ id }, ENV.JWT_SECRET, {
@@ -41,11 +42,18 @@ export async function createUser(req, res) {
     try {
         const { user_username, user_email, user_phone, user_password } = req.body;
 
+        const defaultRole = await Role.findOne({ role_name: "Satış Temsilcisi" });
+
+        if (!defaultRole) {
+            return res.status(500).json({ message: "Default role not found" });
+        }
+
         const newUser = new User({
             user_username,
             user_email,
             user_phone,
-            user_password
+            user_password,
+            user_role: defaultRole._id
         });
 
         const savedUser = await newUser.save();

@@ -3,6 +3,8 @@ import express from "express";
 import cors from "cors";
 import { connectDB } from "./libs/db.js";
 import userRoutes from "./routes/user.route.js";
+import permissionRoutes from "./routes/permission.route.js";
+import roleRoutes from "./routes/role.route.js";
 
 const app = express();
 const PORT = ENV.PORT || 3000;
@@ -14,6 +16,8 @@ app.use(cors({
     optionsSuccessStatus: 200
 }));
 app.use("/api/users", userRoutes);
+app.use("/api/permissions", permissionRoutes);
+app.use("/api/roles", roleRoutes);
 
 connectDB().then(() => {
     app.listen(PORT, () => {
