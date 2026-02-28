@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { ENV } from "../libs/env.js";
 import Role from "../models/Role.js";
+import { sendEmail } from "../libs/mailer.js";
 
 const generateToken = (id) => {
     return jwt.sign({ id }, ENV.JWT_SECRET, {
@@ -141,5 +142,63 @@ export async function loginUser(req, res) {
         console.error("Error logging in user: ", error);
         
         res.status(500).json({ message: "Internal server error" });
+    }
+}
+
+export async function forgotPassword(req, res) {
+    try {
+        const { user_email } = req.body;
+        const user = await User.findOne({ user_email });
+
+        if (!user) {
+            return res.status(404).json({ message: "Bu e-posta adresine ait kullanıcı bulunamadı." });
+        }
+
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        user.resetPasswordOTP = otp;
+        user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
+        await user.save();
+
+        const emailText = `Merhaba ${user.user_username},\n\nŞifre sıfırlama kodunuz: ${otp}\n\nBu kod 10 dakika boyunca geçerlidir. Lütfen kimseyle paylaşmayın.`;
+        await sendEmail({
+            to: user.user_email,
+            subject: "Şahinsoy Perde - Şifre Sıfırlama Kodu",
+            text: emailText
+        });
+
+        res.status(200).json({ message: "Şifre sıfırlama kodu (OTP) e-posta adresinize gönderildi." });
+    } catch (error) {
+        console.error("Error in forgotPassword: ", error);
+
+        res.status(500).json({ message: "Kod gönderilirken bir hata oluştu." });
+    }
+}
+
+export async function resetPassword(req, res) {
+    try {
+        const { user_email, otp, new_password } = req.body;
+
+        const user = await User.findOne({ 
+            user_email, 
+            resetPasswordOTP: otp,
+            resetPasswordExpires: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: "Geçersiz veya süresi dolmuş kod girdiniz." });
+        }
+
+        user.user_password = new_password;
+        user.resetPasswordOTP = null;
+        user.resetPasswordExpires = null;
+        
+        await user.save();
+
+        res.status(200).json({ message: "Şifreniz başarıyla güncellendi." });
+    } catch (error) {
+        console.error("Error in resetPassword: ", error);
+
+        res.status(500).json({ message: "Şifre sıfırlanırken bir hata oluştu." });
     }
 }

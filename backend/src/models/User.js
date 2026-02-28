@@ -25,6 +25,14 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "Role",
         default: "6953f6857c119f679816bea5"
+    },
+    resetPasswordOTP: {
+        type: String,
+        default: null
+    },
+    resetPasswordExpires: {
+        type: Date,
+        default: null
     }
 }, { timestamps: true });
 
@@ -34,7 +42,7 @@ userSchema.pre("save", async function() {
     }
 
     const salt = await bcrypt.genSalt(10);
-
+    
     this.user_password = await bcrypt.hash(this.user_password, salt);
 });
 
