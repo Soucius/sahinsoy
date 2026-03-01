@@ -9,6 +9,9 @@ import {
   Menu,
   X,
   User,
+  Tag,
+  Ruler,
+  Layers,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import api from "../libs/axios";
@@ -34,6 +37,21 @@ const DashboardLayout = () => {
       title: "Ürünler & Stok",
       path: "/dashboard/products",
       icon: <Package size={20} />,
+    },
+    {
+      title: "Kategori Yönetimi",
+      path: "/dashboard/categories",
+      icon: <Layers size={20} />,
+    },
+    {
+      title: "Marka Yönetimi",
+      path: "/dashboard/brands",
+      icon: <Tag size={20} />,
+    },
+    {
+      title: "Birim Yönetimi",
+      path: "/dashboard/units",
+      icon: <Ruler size={20} />,
     },
     {
       title: "Satış Geçmişi",
@@ -109,9 +127,7 @@ const DashboardLayout = () => {
           {menuItems.map((item) => {
             const isActive =
               location.pathname === item.path ||
-              (item.path !== "/dashboard" &&
-                location.pathname.startsWith(item.path));
-
+              (item.path !== "/dashboard" && location.pathname === item.path);
             return (
               <Link
                 key={item.path}

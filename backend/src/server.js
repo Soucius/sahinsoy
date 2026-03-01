@@ -8,6 +8,8 @@ import roleRoutes from "./routes/role.route.js";
 import brandRoutes from "./routes/brand.route.js";
 import unitRoutes from "./routes/unit.route.js";
 import productRoutes from "./routes/product.route.js";
+import saleRoutes from "./routes/sale.route.js";
+import categoryRoutes from "./routes/category.route.js";
 
 const app = express();
 const PORT = ENV.PORT || 3000;
@@ -24,6 +26,8 @@ app.use("/api/roles", roleRoutes);
 app.use("/api/brands", brandRoutes);
 app.use("/api/units", unitRoutes);
 app.use("/api/products", productRoutes);
+app.use("/api/sales", saleRoutes);
+app.use("/api/categories", categoryRoutes);
 
 connectDB().then(() => {
     app.listen(PORT, () => {

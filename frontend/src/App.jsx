@@ -9,6 +9,11 @@ import DashboardLayout from "./layouts/DashboardLayout";
 import DashboardPage from "./pages/DashboardPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import AccountPage from "./pages/AccountPage";
+import BrandsPage from "./pages/BrandsPage";
+import UnitsPage from "./pages/UnitsPage";
+import ProductsPage from "./pages/ProductsPage";
+import PosPage from "./pages/PosPage";
+import CategoriesPage from "./pages/CategoriesPage";
 
 function App() {
   return (
@@ -24,6 +29,11 @@ function App() {
           <Route path="/dashboard" element={<DashboardLayout />}>
             <Route index element={<DashboardPage />} />
             <Route path="account" element={<AccountPage />} />
+            <Route path="brands" element={<BrandsPage />} />
+            <Route path="units" element={<UnitsPage />} />
+            <Route path="products" element={<ProductsPage />} />
+            <Route path="pos" element={<PosPage />} />
+            <Route path="categories" element={<CategoriesPage />} />
           </Route>
         </Route>
       </Routes>

@@ -32,6 +32,30 @@ export async function createBrand(req, res) {
     }
 }
 
+export async function updateBrand(req, res) {
+    try {
+        const updatedBrand = await Brand.findByIdAndUpdate(
+            req.params.id, 
+            req.body, 
+            { new: true, runValidators: true }
+        );
+
+        if (!updatedBrand) {
+            return res.status(404).json({ message: "Marka bulunamadı." });
+        }
+
+        res.status(200).json(updatedBrand);
+    } catch (error) {
+        console.error("Marka güncellenirken hata: ", error);
+
+        if (error.code === 11000) {
+            return res.status(400).json({ message: "Bu marka adı zaten kullanılıyor." });
+        }
+
+        res.status(500).json({ message: "Sunucu hatası oluştu." });
+    }
+}
+
 export async function deleteBrand(req, res) {
     try {
         const deletedBrand = await Brand.findByIdAndDelete(req.params.id);

@@ -32,6 +32,30 @@ export async function createUnit(req, res) {
     }
 }
 
+export async function updateUnit(req, res) {
+    try {
+        const updatedUnit = await Unit.findByIdAndUpdate(
+            req.params.id, 
+            req.body, 
+            { new: true, runValidators: true }
+        );
+
+        if (!updatedUnit) {
+            return res.status(404).json({ message: "Birim bulunamadı." });
+        }
+
+        res.status(200).json(updatedUnit);
+    } catch (error) {
+        console.error("Birim güncellenirken hata: ", error);
+        
+        if (error.code === 11000) {
+            return res.status(400).json({ message: "Bu birim adı veya kodu zaten kullanılıyor." });
+        }
+
+        res.status(500).json({ message: "Sunucu hatası oluştu." });
+    }
+}
+
 export async function deleteUnit(req, res) {
     try {
         const deletedUnit = await Unit.findByIdAndDelete(req.params.id);
