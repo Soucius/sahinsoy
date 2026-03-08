@@ -14,6 +14,7 @@ import UnitsPage from "./pages/UnitsPage";
 import ProductsPage from "./pages/ProductsPage";
 import PosPage from "./pages/PosPage";
 import CategoriesPage from "./pages/CategoriesPage";
+import SalesPage from "./pages/SalesPage";
 
 function App() {
   return (
@@ -34,6 +35,7 @@ function App() {
             <Route path="products" element={<ProductsPage />} />
             <Route path="pos" element={<PosPage />} />
             <Route path="categories" element={<CategoriesPage />} />
+            <Route path="sales" element={<SalesPage />} />
           </Route>
         </Route>
       </Routes>

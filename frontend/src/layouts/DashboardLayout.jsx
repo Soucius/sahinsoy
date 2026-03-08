@@ -12,6 +12,8 @@ import {
   Tag,
   Ruler,
   Layers,
+  Lock,
+  Loader2,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import api from "../libs/axios";
@@ -19,52 +21,14 @@ import api from "../libs/axios";
 const DashboardLayout = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
+  const [isUserLoading, setIsUserLoading] = useState(true);
   const location = useLocation();
   const navigate = useNavigate();
-
-  const menuItems = [
-    {
-      title: "Genel Bakış",
-      path: "/dashboard",
-      icon: <LayoutDashboard size={20} />,
-    },
-    {
-      title: "POS Ekranı",
-      path: "/dashboard/pos",
-      icon: <MonitorPlay size={20} />,
-    },
-    {
-      title: "Ürünler & Stok",
-      path: "/dashboard/products",
-      icon: <Package size={20} />,
-    },
-    {
-      title: "Kategori Yönetimi",
-      path: "/dashboard/categories",
-      icon: <Layers size={20} />,
-    },
-    {
-      title: "Marka Yönetimi",
-      path: "/dashboard/brands",
-      icon: <Tag size={20} />,
-    },
-    {
-      title: "Birim Yönetimi",
-      path: "/dashboard/units",
-      icon: <Ruler size={20} />,
-    },
-    {
-      title: "Satış Geçmişi",
-      path: "/dashboard/sales",
-      icon: <FileText size={20} />,
-    },
-  ];
 
   useEffect(() => {
     const fetchUserData = async () => {
       try {
         const token = localStorage.getItem("token");
-
         if (token) {
           const base64Url = token.split(".")[1];
           const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
@@ -75,6 +39,8 @@ const DashboardLayout = () => {
         }
       } catch (error) {
         console.error("Kullanıcı bilgileri alınamadı:", error);
+      } finally {
+        setIsUserLoading(false);
       }
     };
 
@@ -83,11 +49,69 @@ const DashboardLayout = () => {
 
   const handleLogout = () => {
     localStorage.removeItem("token");
-
     toast.success("Başarıyla çıkış yapıldı.");
-
     navigate("/signin");
   };
+
+  const userRole = currentUser?.user_role?.role_name || "";
+  const isSalesRepresentative = userRole === "Satış Temsilcisi";
+  const isAdmin = !isSalesRepresentative;
+  const restrictedPaths = [
+    "/dashboard/products",
+    "/dashboard/categories",
+    "/dashboard/brands",
+    "/dashboard/units",
+  ];
+  const isAccessDenied =
+    isSalesRepresentative &&
+    restrictedPaths.some((p) => location.pathname.startsWith(p));
+
+  const menuItems = [
+    {
+      title: "Genel Bakış",
+      path: "/dashboard",
+      icon: <LayoutDashboard size={20} />,
+      allowed: true,
+    },
+    {
+      title: "POS Ekranı",
+      path: "/dashboard/pos",
+      icon: <MonitorPlay size={20} />,
+      allowed: true,
+    },
+    {
+      title: "Satış Geçmişi",
+      path: "/dashboard/sales",
+      icon: <FileText size={20} />,
+      allowed: true,
+    },
+    {
+      title: "Ürünler & Stok",
+      path: "/dashboard/products",
+      icon: <Package size={20} />,
+      allowed: isAdmin,
+    },
+    {
+      title: "Kategori Yönetimi",
+      path: "/dashboard/categories",
+      icon: <Layers size={20} />,
+      allowed: isAdmin,
+    },
+    {
+      title: "Marka Yönetimi",
+      path: "/dashboard/brands",
+      icon: <Tag size={20} />,
+      allowed: isAdmin,
+    },
+    {
+      title: "Birim Yönetimi",
+      path: "/dashboard/units",
+      icon: <Ruler size={20} />,
+      allowed: isAdmin,
+    },
+  ];
+
+  const visibleMenuItems = menuItems.filter((item) => item.allowed);
 
   return (
     <div className="h-screen w-full bg-gray-50 flex overflow-hidden font-sans">
@@ -124,23 +148,17 @@ const DashboardLayout = () => {
         </div>
 
         <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
-          {menuItems.map((item) => {
+          {visibleMenuItems.map((item) => {
             const isActive =
               location.pathname === item.path ||
               (item.path !== "/dashboard" && location.pathname === item.path);
+
             return (
               <Link
                 key={item.path}
                 to={item.path}
                 onClick={() => setIsSidebarOpen(false)}
-                className={`
-                  flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
-                  ${
-                    isActive
-                      ? "bg-indigo-50 text-indigo-700"
-                      : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                  }
-                `}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"}`}
               >
                 <span
                   className={isActive ? "text-indigo-600" : "text-gray-400"}
@@ -159,8 +177,7 @@ const DashboardLayout = () => {
             onClick={handleLogout}
             className="flex items-center gap-3 px-3 py-2.5 w-full rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
           >
-            <LogOut size={20} />
-            Sistemden Çıkış Yap
+            <LogOut size={20} /> Sistemden Çıkış Yap
           </button>
         </div>
       </aside>
@@ -190,7 +207,9 @@ const DashboardLayout = () => {
                 {currentUser ? currentUser.user_username : "Yükleniyor..."}
               </span>
 
-              <span className="text-xs text-gray-500">Satış Temsilcisi</span>
+              <span className="text-xs text-indigo-600 font-semibold bg-indigo-50 px-2 py-0.5 rounded-md mt-0.5">
+                {userRole || "Yükleniyor..."}
+              </span>
             </div>
 
             <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600">
@@ -200,7 +219,35 @@ const DashboardLayout = () => {
         </header>
 
         <div className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8 bg-gray-50">
-          <Outlet context={{ currentUser, setCurrentUser }} />
+          {isUserLoading ? (
+            <div className="flex justify-center items-center h-full">
+              <Loader2 className="animate-spin text-indigo-600" size={40} />
+            </div>
+          ) : isAccessDenied ? (
+            <div className="flex flex-col items-center justify-center h-full text-center max-w-md mx-auto">
+              <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-6 shadow-sm border border-red-200">
+                <Lock size={40} />
+              </div>
+
+              <h2 className="text-2xl font-extrabold text-gray-900 mb-2">
+                Erişim Engellendi
+              </h2>
+
+              <p className="text-gray-500 text-sm leading-relaxed">
+                Bu sayfayı görüntüleme ve işlem yapma yetkiniz bulunmamaktadır.
+                Lütfen mağaza yöneticiniz ile iletişime geçin.
+              </p>
+
+              <Link
+                to="/dashboard"
+                className="mt-6 px-6 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium shadow-sm"
+              >
+                Ana Sayfaya Dön
+              </Link>
+            </div>
+          ) : (
+            <Outlet context={{ currentUser, setCurrentUser }} />
+          )}
         </div>
       </main>
     </div>

@@ -10,6 +10,7 @@ import unitRoutes from "./routes/unit.route.js";
 import productRoutes from "./routes/product.route.js";
 import saleRoutes from "./routes/sale.route.js";
 import categoryRoutes from "./routes/category.route.js";
+import dashboardRoutes from "./routes/dashboard.route.js";
 
 const app = express();
 const PORT = ENV.PORT || 3000;
@@ -28,6 +29,7 @@ app.use("/api/units", unitRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/sales", saleRoutes);
 app.use("/api/categories", categoryRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 connectDB().then(() => {
     app.listen(PORT, () => {
