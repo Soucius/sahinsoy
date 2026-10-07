@@ -17,6 +17,8 @@ const saleItemSchema = new mongoose.Schema({
 
 const saleSchema = new mongoose.Schema({
     client_request_id: { type: String, unique: true, sparse: true },
+    approved_at: { type: Date, default: null },
+    lost_at: { type: Date, default: null },
     pos_details: { type: mongoose.Schema.Types.Mixed, default: null },
     discount_percent: { type: Number, default: 0, min: 0, max: 100 },
     delivery_method: { type: String, enum: ["store", "installation", "magaza", "montaj", ""], default: "" },
