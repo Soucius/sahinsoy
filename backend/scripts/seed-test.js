@@ -14,6 +14,62 @@ const TEST_ADMIN = Object.freeze({
 
 class SeedSafetyError extends Error {}
 
+function readSeedErrorField(error, field) {
+    try {
+        return error && typeof error === "object" ? error[field] : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function classifySeedFailure(error) {
+    const chain = [];
+    const seen = new Set();
+    let current = error;
+
+    // Only inspect allowlisted scalar fields and a bounded, cycle-safe cause chain.
+    while (current && typeof current === "object" && !seen.has(current) && chain.length < 8) {
+        seen.add(current);
+        const code = readSeedErrorField(current, "code");
+        // Atlas code 8000 is broad. Recognize only these exact fixed auth literals.
+        const atlasMessage = code === 8000 ? readSeedErrorField(current, "message") : undefined;
+        chain.push({
+            code,
+            codeName: readSeedErrorField(current, "codeName"),
+            name: readSeedErrorField(current, "name"),
+            knownAtlasAuth: typeof atlasMessage === "string" &&
+                ["bad auth : authentication failed", "bad auth : authentication failed."].includes(atlasMessage.toLowerCase())
+        });
+        current = readSeedErrorField(current, "cause");
+    }
+
+    if (chain.some((item) => item.code === 18 || item.codeName === "AuthenticationFailed" || item.name === "MongoMissingCredentialsError" || item.knownAtlasAuth)) {
+        return "Test seed failed [AUTH_FAILED]. Check test database credentials privately.";
+    }
+    if (chain.some((item) => item.code === 11000)) {
+        return "Test seed failed [DUPLICATE_CONFLICT]. An existing record conflicts with the test fixtures.";
+    }
+    if (chain.some((item) => ["ValidationError", "CastError"].includes(item.name))) {
+        return "Test seed failed [VALIDATION_FAILED]. Check the synthetic test fixture fields.";
+    }
+    if (chain.some((item) => ["ENOTFOUND", "EAI_AGAIN"].includes(item.code))) {
+        return "Test seed failed [DNS_FAILURE]. Check the test MongoDB hostname and DNS availability privately.";
+    }
+    if (chain.some((item) => item.name === "MongoParseError")) {
+        return "Test seed failed [URI_PARSE_FAILED]. Check the connection string format and credential encoding privately.";
+    }
+    if (chain.some((item) => item.code === 8000)) {
+        return "Test seed failed [SERVER_REJECTED]. The MongoDB server rejected the request; check test access settings privately.";
+    }
+    if (chain.some((item) =>
+        ["MongoServerSelectionError", "MongooseServerSelectionError", "MongoNetworkError", "MongoNetworkTimeoutError"].includes(item.name) ||
+        ["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "EHOSTUNREACH", "ENETUNREACH", "ESOCKETTIMEDOUT"].includes(item.code)
+    )) {
+        return "Test seed failed [SERVER_SELECTION_OR_NETWORK]. Check test cluster availability and network access privately.";
+    }
+    return "Test seed failed [UNKNOWN_FAILURE]. Check the isolated MongoDB instance and seed configuration.";
+}
+
 function requireTestDatabaseUri(rawUri) {
     if (!rawUri || rawUri !== rawUri.trim()) {
         throw new SeedSafetyError("MONGO_URI must be a MongoDB URI for sahinsoy_test.");
@@ -79,6 +135,8 @@ async function seedTestDatabase() {
             throw new SeedSafetyError("Connected database is not sahinsoy_test; refusing all seed writes.");
         }
 
+        console.log("Seed phase: connected to sahinsoy_test.");
+
         const existingUser = await User.findOne({
             $or: [
                 { user_username: TEST_ADMIN.user_username },
@@ -99,6 +157,7 @@ async function seedTestDatabase() {
 
         await ensureRole(SALES_ROLE);
         const adminRole = await ensureRole(TEST_ADMIN_ROLE);
+        console.log("Seed phase: roles ready.");
 
         if (existingUser) {
             console.log("Test admin already exists; its password and role were not changed.");
@@ -106,6 +165,7 @@ async function seedTestDatabase() {
         }
 
         // User.create runs the existing model's password-hashing save hook.
+        console.log("Seed phase: creating synthetic test admin.");
         await User.create({
             ...TEST_ADMIN,
             user_password: password,
@@ -120,11 +180,11 @@ async function seedTestDatabase() {
 }
 
 seedTestDatabase().catch(async (error) => {
-    // Driver errors can contain connection details. Print only known validation text.
+    // Driver errors can contain credentials. Print fixed categories or our validation text only.
     if (error instanceof SeedSafetyError) {
         console.error(error.message);
     } else {
-        console.error("Test seed failed. Check the isolated MongoDB instance and seed configuration.");
+        console.error(classifySeedFailure(error));
     }
     try {
         await mongoose.disconnect();
