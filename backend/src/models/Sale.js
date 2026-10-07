@@ -16,6 +16,10 @@ const saleItemSchema = new mongoose.Schema({
 
 
 const saleSchema = new mongoose.Schema({
+    client_request_id: { type: String, unique: true, sparse: true },
+    pos_details: { type: mongoose.Schema.Types.Mixed, default: null },
+    discount_percent: { type: Number, default: 0, min: 0, max: 100 },
+    delivery_method: { type: String, enum: ["store", "installation", "magaza", "montaj", ""], default: "" },
     sale_items: [saleItemSchema],
     sub_total: { type: Number, required: true },       
     discount_amount: { type: Number, default: 0 },     
@@ -24,7 +28,7 @@ const saleSchema = new mongoose.Schema({
     payment_method: { type: String, default: "Nakit" },
     status: { 
         type: String, 
-        enum: ["beklemede", "tamamlandi"], 
+        enum: ["beklemede", "tamamlandi", "kaybedildi"],
         default: "tamamlandi" 
     },
     customer_name: { type: String, default: "" },
