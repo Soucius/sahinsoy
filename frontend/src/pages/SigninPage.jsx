@@ -51,6 +51,7 @@ const SigninPage = () => {
           <span className="font-medium text-sm">Ana Sayfaya Dön</span>
         </Link>
 
+        <img src="/sahinsoy-logo.svg" alt="Şahinsoy" className="brand-logo mx-auto mt-6 mb-4"/>
         <h2 className="mt-2 text-center text-3xl font-extrabold text-gray-900">
           Hesabınıza Giriş Yapın
         </h2>
