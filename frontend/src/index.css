@@ -1,3 +1,27 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root { color-scheme: light; --coffee:#754b2e; --ink:#392b22; --cream:#f5efe6; --sand:#e4d3bb; --paper:#fffcf6; }
+body { margin:0; color:var(--ink); background:var(--cream); font-family:'Segoe UI',sans-serif; }
+h1,h2,h3 { color:var(--ink); }
+.brand-logo { width:175px; height:105px; object-fit:contain; mix-blend-mode:multiply; }
+[class~="bg-gray-50"],[class~="bg-gray-100"] { background-color:var(--cream)!important; }
+[class~="bg-white"] { background-color:var(--paper)!important; }
+[class*="bg-indigo-6"],[class*="bg-indigo-7"],[class*="bg-blue-6"] { background-color:var(--coffee)!important; }
+[class~="bg-indigo-50"],[class~="bg-indigo-100"],[class~="bg-blue-50"],[class~="bg-blue-100"] { background-color:#eee1d0!important; }
+[class*="text-indigo-"],[class*="text-blue-"] { color:var(--coffee)!important; }
+[class~="border-gray-100"],[class~="border-gray-200"],[class~="border-gray-300"] { border-color:#e3d4c1!important; }
+button,input:not([type="checkbox"]):not([type="radio"]),select { min-height:46px; touch-action:manipulation; }
+input,select,textarea { background:var(--paper); accent-color:var(--coffee); }
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible { outline:3px solid #b38b62; outline-offset:2px; }
+input:focus,select:focus,textarea:focus { --tw-ring-color:#b38b62!important; border-color:#b38b62!important; }
+.home-shell { min-height:100vh; background:radial-gradient(ellipse at top right,#ead8bd,transparent 55%),#f5efe6; }
+.home-card { width:min(1000px,92%); margin:auto; padding:60px 0; text-align:center; }
+.home-title { font-family:Georgia,serif; font-size:clamp(36px,6vw,68px); font-weight:500; line-height:1.1; }
+.home-brand { width:280px; max-width:70vw; height:205px; object-fit:contain; mix-blend-mode:multiply; margin:0 auto 18px; }
+.home-button { display:inline-flex; align-items:center; justify-content:center; min-height:56px; padding:14px 32px; border-radius:18px; background:var(--coffee); color:white; font-weight:600; margin:24px 0; }
+.home-features { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin-top:38px; text-align:left; }
+.home-feature { background:var(--paper); border:1px solid #e0ccb0; border-radius:24px; padding:26px; }
+.home-feature h2 { font-family:Georgia,serif; font-size:25px; margin-bottom:12px; }
+@media(max-width:700px){.home-features{grid-template-columns:1fr}.home-card{padding-top:25px}.home-brand{height:160px}.brand-logo{width:150px;height:90px}}
