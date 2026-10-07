@@ -1,11 +1,19 @@
 import mongoose from "mongoose";
 
 const extraOptionSchema = new mongoose.Schema({
+    pricing_basis: { type: String, enum: ["birim", "adet", "mt", "m2"], default: "birim" },
+    currency: { type: String, enum: ["TRY", "USD", "EUR"], default: "TRY" },
     option_name: { type: String, required: true },
     price_impact: { type: Number, required: true, default: 0 }
 });
 
 const productSchema = new mongoose.Schema({
+    catalog_id: { type: String, unique: true, sparse: true },
+    stock_tracking: { type: Boolean, default: true },
+    currency: { type: String, enum: ["TRY", "USD", "EUR"], default: "TRY" },
+    fabric_width_cm: { type: Number, default: 0 },
+    grammage_gr: { type: Number, default: 0 },
+    variants: [{ vr: { type: String, trim: true }, color: { type: String, trim: true }, stock_quantity: { type: Number, default: 0, min: 0 } }],
     product_name: {
         type: String,
         required: true,
