@@ -37,8 +37,8 @@ const DashboardLayout = () => {
 
           setCurrentUser(response.data);
         }
-      } catch (error) {
-        console.error("Kullanıcı bilgileri alınamadı:", error);
+      } catch {
+        console.error("Kullanıcı bilgileri alınamadı.");
       } finally {
         setIsUserLoading(false);
       }
