@@ -25,7 +25,7 @@ export async function getAllUsers(_, res) {
 
 export async function getUserById(req, res) {
     try {
-        const user = await User.findById(req.params.id).populate("user_role", "role_name");
+        const user = await User.findById(req.params.id).populate("user_role", "role_name").select("-user_password");
 
         if (!user) {
             return res.status(404).json({ message: "User not found" });
