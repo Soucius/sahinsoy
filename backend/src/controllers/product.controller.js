@@ -1,6 +1,22 @@
 import Product from "../models/Product.js";
 import cloudinary from "../libs/cloudinary.js";
 
+function productExtras(body){
+    const out={};
+    if(body.stock_tracking!==undefined)out.stock_tracking=body.stock_tracking===true||body.stock_tracking==="true";
+    if(body.currency!==undefined){if(!["TRY","USD","EUR"].includes(body.currency))throw new Error("INVALID_PRODUCT");out.currency=body.currency;}
+    if(body.variants!==undefined){
+        const variants=typeof body.variants==="string"?JSON.parse(body.variants):body.variants;
+        if(!Array.isArray(variants)||variants.length>500)throw new Error("INVALID_PRODUCT");
+        const keys=new Set();out.variants=variants.map(v=>{
+            const vr=String(v.vr||"").trim(),color=String(v.color||"").trim(),stock=Number(v.stock_quantity??0),key=vr+'|'+color;
+            if((!vr&&!color)||vr.length>100||color.length>100||!Number.isFinite(stock)||stock<0||keys.has(key))throw new Error("INVALID_PRODUCT");
+            keys.add(key);return{vr,color,stock_quantity:stock};
+        });
+    }
+    return out;
+}
+
 export async function createProduct(req, res) {
     try {
         const { 
@@ -26,6 +42,7 @@ export async function createProduct(req, res) {
         }
 
         const newProduct = new Product({
+            ...productExtras(req.body),
             product_name,
             product_barcode,
             product_category,
@@ -57,7 +74,7 @@ export async function createProduct(req, res) {
 export async function getAllProducts(req, res) {
     try {
         const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
+        const limit = Math.min(3000,Math.max(1,parseInt(req.query.limit) || 10));
         const search = req.query.search || "";
         const brandId = req.query.brand || "";
         const categoryId = req.query.category || "";
@@ -65,9 +82,12 @@ export async function getAllProducts(req, res) {
         let query = {};
         
         if (search) {
+            const literal=search.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
             query.$or = [
-                { product_name: { $regex: search, $options: "i" } },
-                { product_barcode: { $regex: search, $options: "i" } }
+                { product_name: { $regex: literal, $options: "i" } },
+                { product_barcode: { $regex: literal, $options: "i" } },
+                { "variants.vr": { $regex: literal, $options: "i" } },
+                { "variants.color": { $regex: literal, $options: "i" } }
             ];
         }
 
@@ -101,6 +121,7 @@ export async function updateProduct(req, res) {
     try {
         const productId = req.params.id;
         let updateData = { ...req.body };
+        Object.assign(updateData,productExtras(req.body));
 
         if (req.file) {
             const b64 = Buffer.from(req.file.buffer).toString("base64");
