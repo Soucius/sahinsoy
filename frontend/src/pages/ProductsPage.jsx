@@ -39,6 +39,9 @@ const ProductsPage = () => {
   const [editingId, setEditingId] = useState(null);
 
   const initialFormState = {
+    variants: [],
+    stock_tracking: true,
+    currency: "TRY",
     product_name: "",
     product_barcode: "",
     product_category: "",
@@ -55,6 +58,14 @@ const ProductsPage = () => {
     product_image: null,
   };
   const [formData, setFormData] = useState(initialFormState);
+  const [isImporting,setIsImporting]=useState(false);
+  const [catalogText,setCatalogText]=useState('');
+  const handleCatalogTextImport=async()=>{setIsImporting(true);try{const data=JSON.parse(catalogText);if(!Array.isArray(data.products))throw new Error('Katalog biçimi geçersiz.');const response=await api.post('/products/import-catalog',data);setCatalogText('');toast.success(response.data.message);await fetchFilters();await fetchProducts();}catch(error){toast.error(error.response?.data?.message||'Katalog metni aktarılamadı.');}finally{setIsImporting(false);}};
+  const handleCatalogImport=async(e)=>{
+    const file=e.target.files?.[0];if(!file)return;
+    setIsImporting(true);
+    try{const data=JSON.parse(await file.text());if(!Array.isArray(data.products))throw new Error('Geçersiz katalog dosyası.');const response=await api.post('/products/import-catalog',data);toast.success(response.data.message);await fetchFilters();await fetchProducts();}catch(error){toast.error(error.response?.data?.message||'Katalog dosyası aktarılamadı.');}finally{setIsImporting(false);e.target.value='';}
+  };
 
   useEffect(() => {
     fetchFilters();
@@ -184,6 +195,9 @@ const ProductsPage = () => {
     setEditingId(product._id);
     setFormData({
       product_name: product.product_name,
+      variants: product.variants || [],
+      stock_tracking: product.stock_tracking !== false,
+      currency: product.currency || "TRY",
       product_barcode: product.product_barcode || "",
       product_category: product.product_category?._id || "",
       product_brand: product.product_brand?._id || "",
@@ -207,7 +221,7 @@ const ProductsPage = () => {
 
     const submitData = new FormData();
     Object.keys(formData).forEach((key) => {
-      if (key === "extra_options") {
+      if (key === "extra_options" || key === "variants") {
         submitData.append(key, JSON.stringify(formData[key])); // Array'i JSON string yapıyoruz
       } else if (formData[key] !== null && formData[key] !== "") {
         submitData.append(key, formData[key]);
@@ -258,7 +272,8 @@ const ProductsPage = () => {
           <Plus size={20} /> Yeni Ürün Ekle
         </button>
       </div>
-
+      <div className="flex items-center gap-3 mb-4"><label className="px-4 py-3 rounded-lg border cursor-pointer bg-white">{isImporting?'Katalog aktarılıyor…':'Katalog dosyasını içe aktar'}<input aria-label="Katalog dosyası" type="file" accept="application/json,.json" disabled={isImporting} onChange={handleCatalogImport} className="hidden"/></label><span className="text-sm text-gray-600">{pagination.totalProducts} kayıtlı ürün · Renk ve VR bilgileri ürün düzenleme alanında.</span></div>
+      <details className="mb-4 border rounded-xl bg-white p-4"><summary className="cursor-pointer font-semibold">Katalog metniyle aktarım</summary><p className="text-sm my-3">Hazırlanmış katalog verisini buradan test veritabanına aktarabilirsiniz. Mevcut ürünlerin bilgileri korunur.</p><textarea aria-label="Katalog metni" value={catalogText} onChange={e=>setCatalogText(e.target.value)} rows={3} className="w-full border rounded-lg p-3"/><button disabled={isImporting||!catalogText} onClick={handleCatalogTextImport} className="border rounded-lg px-5 mt-3">{isImporting?'Aktarılıyor…':'Katalog metnini aktar'}</button></details>
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4">
         <div className="flex-1 relative">
           <Search
@@ -402,13 +417,12 @@ const ProductsPage = () => {
                               : "text-red-600"
                           }
                         >
-                          Stok: {product.stock_quantity}{" "}
-                          {product.product_unit?.unit_code}
+                          {product.stock_tracking===false?'Stok bilgisi henüz girilmedi':`Stok: ${product.stock_quantity} ${product.product_unit?.unit_code||''}`}
                         </span>
                       </div>
                     </td>
                     <td className="px-6 py-4 font-bold text-gray-900">
-                      ₺{product.sale_price}
+                      {new Intl.NumberFormat('tr-TR',{style:'currency',currency:product.currency||'TRY'}).format(product.sale_price)}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <button
@@ -677,6 +691,13 @@ const ProductsPage = () => {
               </div>
 
               {/* 4. Stok, Fiyat ve Görsel */}
+              <section className="mb-6 p-4 border rounded-xl bg-gray-50">
+                <div className="flex justify-between items-center mb-3"><h3 className="font-semibold">Renk ve VR numaraları</h3><button type="button" onClick={()=>setFormData({...formData,variants:[...formData.variants,{vr:'',color:'',stock_quantity:0}]})} className="px-3 rounded-lg border">+ Renk / VR ekle</button></div>
+                <p className="text-sm mb-3">Aynı ürüne istediğiniz kadar farklı renk ve VR ekleyebilirsiniz.</p>
+                {formData.variants.map((v,i)=><div key={i} className="grid grid-cols-4 gap-2 mb-2">{[['vr','VR numarası'],['color','Renk']].map(([key,label])=><input key={key} aria-label={`${label} ${i+1}`} placeholder={label} value={v[key]} onChange={e=>setFormData({...formData,variants:formData.variants.map((x,j)=>j===i?{...x,[key]:e.target.value}:x)})} className="px-3 border rounded-lg"/>)}<input type="number" min="0" step="0.01" aria-label={`Varyant stok ${i+1}`} placeholder="Stok" value={v.stock_quantity} onChange={e=>setFormData({...formData,variants:formData.variants.map((x,j)=>j===i?{...x,stock_quantity:Number(e.target.value)}:x)})} className="px-3 border rounded-lg"/><button type="button" onClick={()=>setFormData({...formData,variants:formData.variants.filter((_,j)=>j!==i)})} className="border rounded-lg">Kaldır</button></div>)}
+                <label className="flex items-center gap-3 my-3"><input type="checkbox" checked={formData.stock_tracking} onChange={e=>setFormData({...formData,stock_tracking:e.target.checked})}/>Stok miktarını takip et</label>
+                <label className="flex items-center gap-3">Para birimi<select name="currency" value={formData.currency} onChange={handleInputChange} className="px-3 border rounded-lg"><option value="TRY">TL</option><option value="USD">USD</option><option value="EUR">EUR</option></select></label>
+              </section>
               <h3 className="font-semibold text-gray-700 border-b pb-2 mb-4">
                 3. Stok ve Fiyat
               </h3>
