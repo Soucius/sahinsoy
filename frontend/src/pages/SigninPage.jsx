@@ -29,7 +29,7 @@ const SigninPage = () => {
 
       navigate("/dashboard");
     } catch (error) {
-      console.error("Giriş hatası:", error);
+      console.error("Giriş isteği başarısız.");
 
       toast.error(
         error.response?.data?.message || "Giriş yapılırken bir hata oluştu.",
