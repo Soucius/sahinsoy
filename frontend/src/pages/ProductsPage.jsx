@@ -133,13 +133,14 @@ const ProductsPage = () => {
       ...formData,
       extra_options: [
         ...formData.extra_options,
-        { option_name: "", price_impact: 0 },
+        { option_name: "", price_impact: 0, pricing_basis: "birim", currency: "TRY" },
       ],
     });
   };
   const handleOptionChange = (index, field, value) => {
-    const newOptions = [...formData.extra_options];
-    newOptions[index][field] = value;
+    const newOptions = formData.extra_options.map((option, optionIndex) => optionIndex === index
+      ? { ...option, [field]: value, ...(field === "pricing_basis" && value === "yuzde" ? { currency: "TRY" } : {}) }
+      : option);
     setFormData({ ...formData, extra_options: newOptions });
   };
   const handleRemoveOption = (index) => {
@@ -628,7 +629,7 @@ const ProductsPage = () => {
               <div className="mb-6">
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="font-semibold text-gray-700">
-                    Ekstra Seçenekler (Pile, İşçilik vb.)
+                    Aksesuar ve Ek Fiyat Seçenekleri
                   </h3>
                   <button
                     type="button"
@@ -645,10 +646,11 @@ const ProductsPage = () => {
                 ) : (
                   <div className="space-y-2">
                     {formData.extra_options.map((opt, index) => (
-                      <div key={index} className="flex gap-2 items-center">
+                      <div key={index} className="flex flex-wrap gap-2 items-center">
                         <input
                           type="text"
-                          placeholder="Seçenek Adı (Örn: Amerikan Pile)"
+                          placeholder="Seçenek adı (Örn: Kapalı kasa)"
+                          aria-label={`Aksesuar adı ${index + 1}`}
                           value={opt.option_name}
                           onChange={(e) =>
                             handleOptionChange(
@@ -661,11 +663,15 @@ const ProductsPage = () => {
                         />
                         <div className="flex-1 relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">
-                            ₺
+                            {opt.pricing_basis === "yuzde" ? "%" : opt.currency === "USD" ? "$" : opt.currency === "EUR" ? "€" : "₺"}
                           </span>
                           <input
                             type="number"
-                            placeholder="Fiyat Etkisi"
+                            placeholder={opt.pricing_basis === "yuzde" ? "Yüzde oranı" : "Birim fiyatı"}
+                            aria-label={`Aksesuar ${opt.pricing_basis === "yuzde" ? "yüzde oranı" : "birim fiyatı"} ${index + 1}`}
+                            min="0"
+                            max={opt.pricing_basis === "yuzde" ? 100 : undefined}
+                            step="0.01"
                             value={opt.price_impact}
                             onChange={(e) =>
                               handleOptionChange(
@@ -677,6 +683,28 @@ const ProductsPage = () => {
                             className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm"
                           />
                         </div>
+                        <select
+                          aria-label={`Aksesuar hesaplama birimi ${index + 1}`}
+                          value={opt.pricing_basis || "birim"}
+                          onChange={(e) => handleOptionChange(index, "pricing_basis", e.target.value)}
+                          className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                        >
+                          <option value="birim">Ürün birimi</option>
+                          <option value="adet">Adet başına</option>
+                          <option value="mt">Metre başına</option>
+                          <option value="m2">m² başına</option>
+                          <option value="yuzde">Ürün bedelinin yüzdesi</option>
+                        </select>
+                        {opt.pricing_basis !== "yuzde" && <select
+                          aria-label={`Aksesuar para birimi ${index + 1}`}
+                          value={opt.currency || "TRY"}
+                          onChange={(e) => handleOptionChange(index, "currency", e.target.value)}
+                          className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                        >
+                          <option value="TRY">TL</option>
+                          <option value="USD">USD</option>
+                          <option value="EUR">EUR</option>
+                        </select>}
                         <button
                           type="button"
                           onClick={() => handleRemoveOption(index)}
