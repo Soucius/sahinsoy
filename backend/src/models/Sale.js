@@ -19,6 +19,16 @@ const saleSchema = new mongoose.Schema({
     client_request_id: { type: String, unique: true, sparse: true },
     approved_at: { type: Date, default: null },
     lost_at: { type: Date, default: null },
+    cancelled_at: { type: Date, default: null },
+    cancelled_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    stock_deductions: {
+        type: [new mongoose.Schema({
+            product: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
+            quantity: { type: Number, required: true, min: 0.000001 }
+        }, { _id: false })],
+        default: null
+    },
+    stock_restoration_pending: { type: Boolean, default: false },
     pos_details: { type: mongoose.Schema.Types.Mixed, default: null },
     discount_percent: { type: Number, default: 0, min: 0, max: 100 },
     delivery_method: { type: String, enum: ["store", "installation", "magaza", "montaj", ""], default: "" },
@@ -30,7 +40,7 @@ const saleSchema = new mongoose.Schema({
     payment_method: { type: String, default: "Nakit" },
     status: { 
         type: String, 
-        enum: ["beklemede", "tamamlandi", "kaybedildi"],
+        enum: ["beklemede", "tamamlandi", "kaybedildi", "iptal"],
         default: "tamamlandi" 
     },
     customer_name: { type: String, default: "" },
