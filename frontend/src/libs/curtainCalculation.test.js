@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { calculateCurtainLine, defaultMeasurement, orderTotals, PLEATS, restoreSaleDraft, salePayload } from "./curtainCalculation.js";
-import { createCustomerOrderHtml, createManufacturingHtml, manufacturingBoxes } from "./curtainPrint.js";
+import { createCustomerOrderHtml, createManufacturingHtml, manufacturingBoxes, openCurtainPrint } from "./curtainPrint.js";
 import { normalizeSale } from "../../../backend/src/libs/sale-validation.js";
 
 const textile = { _id: "test-tul", product_name: "Örnek Tül", product_category: { category_name: "Tül" }, product_brand: { brand_name: "Laferra" }, calculation_type: "mt", sale_price: 500, purchase_price: 999999, stock_tracking: false };
@@ -133,4 +133,18 @@ test("eski tutarlı iskonto ve teslim yöntemi yeni forma doğru taşınır", ()
   const restored = restoreSaleDraft({ customer_name: "Deneme Müşteri", sub_total: 100, discount_amount: 10, discount_percent: 0, delivery_method: "installation", sale_items: [] });
   assert.equal(restored.discount, 10);
   assert.equal(restored.header.delivery_method, "montaj");
+});
+
+test("teslim edilen sipariş çıktısı beklemede sayılmaz ve fiyatını korur", () => {
+  const sale = { ...saved([measured(textile, { count: "1" })], 10), status: "teslim_edildi" };
+  const html = createCustomerOrderHtml(sale);
+  assert.ok(html.includes("Sipariş teslim edildi."));
+  assert.ok(!html.includes("Teklif beklemede."));
+  assert.ok(html.includes("₺5.580,00"));
+});
+
+test("iptal siparişin müşteri ve imalat çıktısı pencere açılmadan engellenir", () => {
+  for (const kind of ["customer", "manufacturing"]) {
+    assert.throws(() => openCurtainPrint({ _id: "cancelled-test", status: "iptal" }, kind), /İptal edilmiş/);
+  }
 });
