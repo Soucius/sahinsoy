@@ -1,5 +1,6 @@
 import Product from "../models/Product.js";
 import cloudinary from "../libs/cloudinary.js";
+import { productSearchPattern } from "../libs/productSearch.js";
 
 function productExtras(body){
     const out={};
@@ -75,19 +76,18 @@ export async function getAllProducts(req, res) {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = Math.min(3000,Math.max(1,parseInt(req.query.limit) || 10));
-        const search = req.query.search || "";
+        const search = productSearchPattern(req.query.search);
         const brandId = req.query.brand || "";
         const categoryId = req.query.category || "";
         const skip = (page - 1) * limit;
         let query = {};
         
         if (search) {
-            const literal=search.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
             query.$or = [
-                { product_name: { $regex: literal, $options: "i" } },
-                { product_barcode: { $regex: literal, $options: "i" } },
-                { "variants.vr": { $regex: literal, $options: "i" } },
-                { "variants.color": { $regex: literal, $options: "i" } }
+                { product_name: { $regex: search, $options: "i" } },
+                { product_barcode: { $regex: search, $options: "i" } },
+                { "variants.vr": { $regex: search, $options: "i" } },
+                { "variants.color": { $regex: search, $options: "i" } }
             ];
         }
 
