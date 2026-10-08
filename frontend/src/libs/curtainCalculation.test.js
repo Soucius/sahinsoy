@@ -52,11 +52,11 @@ test("sağ ve sol kanat farklı ölçülerle imalata aktarılır", () => {
 });
 test("mekanik m² minimumundan sonra yuvarlanır ve her adette uygulanır", () => {
   const product = { ...textile, calculation_type: "m2", min_m2: 0.9, rounding_step: 0.25, product_category: { category_name: "Stor" } };
-  assert.equal(measured(product, { width: "50", height: "100", count: "3" }).quantity, 3);
+  assert.equal(measured(product, { width: "50", height: "100", count: "3", chain_direction: "Sağ" }).quantity, 3);
 });
 test("etek metresi ve redüktör adedi bağımsız fiyatlanır", () => {
   const product = { ...textile, calculation_type: "m2", sale_price: 100, product_category: { category_name: "Stor" }, extra_options: [{ option_name: "Etek çıtası", price_impact: 5, pricing_basis: "mt" }, { option_name: "Redüktör", price_impact: 30, pricing_basis: "adet" }] };
-  const line = measured(product, { width: "200", height: "100", count: "2", extra_indices: [0, 1] });
+  const line = measured(product, { width: "200", height: "100", count: "2", extra_indices: [0, 1], chain_direction: "Sağ" });
   assert.equal(line.material_total, 400);
   assert.equal(line.accessories[0].total, 20);
   assert.equal(line.accessories[1].total, 60);
