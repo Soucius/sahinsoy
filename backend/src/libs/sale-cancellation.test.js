@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import Sale from "../models/Sale.js";
 import Product from "../models/Product.js";
-import { createSale, updateSale, cancelSale } from "../controllers/sale.controller.js";
+import { createSale, updateSale, cancelSale, deliverSale } from "../controllers/sale.controller.js";
+import { getDashboardStats } from "../controllers/dashboard.controller.js";
 
 const userId = "000000000000000000000001";
 const saleId = "000000000000000000000002";
@@ -291,4 +292,148 @@ test("a missing order returns 404 without a stock mutation", async (t) => {
     assert.equal(db.stock(), 10);
     assert.equal(db.stockWrites.length, 0);
     assert.equal(db.saleWrites.length, 0);
+});
+
+test("delivery preserves approval, finances and stock while recording fulfillment exactly once", async (t) => {
+    const approvedAt = "2026-09-15T10:00:00.000Z";
+    const original = storedSale({
+        approved_at: approvedAt, stock_deductions: [{ product: productId, quantity: 2 }],
+    });
+    const db = database(t, { sales: [original], products: [storedProduct({ stock_quantity: 8 })] });
+    const delivered = await db.request(deliverSale, {
+        status: "iptal", delivered_by: otherProductId, delivered_at: "2000-01-01T00:00:00.000Z",
+        approved_at: "2000-01-01T00:00:00.000Z", grand_total: 999,
+        stock_deductions: [{ product: productId, quantity: 999 }],
+    });
+    assert.equal(delivered.statusCode, 200);
+    assert.equal(delivered.body.status, "teslim_edildi");
+    assert.equal(delivered.body.approved_at.toISOString(), approvedAt);
+    assert.ok(delivered.body.delivered_at instanceof Date);
+    assert.notEqual(delivered.body.delivered_at.toISOString(), "2000-01-01T00:00:00.000Z");
+    assert.equal(String(delivered.body.delivered_by), userId);
+    for (const field of ["sale_items", "sub_total", "grand_total", "discount_amount", "stock_deductions"])
+        assert.deepEqual(db.sale()[field], original[field], `${field} must survive delivery unchanged`);
+    assert.equal(db.stock(), 8);
+    assert.equal(db.stockWrites.length, 0);
+    const deliveredAt = delivered.body.delivered_at.getTime();
+    const saveCount = db.saleWrites.length;
+
+    const repeated = await db.request(deliverSale);
+    assert.equal(repeated.statusCode, 200);
+    assert.equal(repeated.body.delivered_at.getTime(), deliveredAt);
+    assert.equal(repeated.body.approved_at.toISOString(), approvedAt);
+    assert.equal(db.saleWrites.length, saveCount, "repeat delivery must not rewrite fulfillment metadata");
+    assert.equal(db.stockWrites.length, 0);
+});
+
+for (const priorDateField of ["updatedAt", "createdAt"]) {
+    test(`legacy delivery retains the historical approval month using ${priorDateField}`, async (t) => {
+        const priorDate = "2026-09-20T10:00:00.000Z";
+        const db = database(t, { sales: [storedSale({
+            approved_at: null, [priorDateField]: priorDate,
+            ...(priorDateField === "updatedAt" ? { createdAt: "2026-08-01T10:00:00.000Z" } : {}),
+        })] });
+        const response = await db.request(deliverSale);
+        assert.equal(response.statusCode, 200);
+        assert.equal(response.body.status, "teslim_edildi");
+        assert.equal(response.body.approved_at.toISOString(), priorDate);
+        assert.equal(db.stockWrites.length, 0);
+    });
+}
+
+for (const status of ["beklemede", "kaybedildi", "iptal"]) {
+    test(`${status} order cannot become delivered`, async (t) => {
+        const original = storedSale({ status });
+        const db = database(t, { sales: [original], products: [storedProduct()] });
+        const response = await db.request(deliverSale);
+        assert.equal(response.statusCode, 409);
+        assert.match(response.body.message, /Yalnız onaylanmış sipariş/);
+        assert.deepEqual(db.sale(), original);
+        assert.equal(db.stockWrites.length, 0);
+        assert.equal(db.saleWrites.length, 0);
+    });
+}
+
+test("delivered order rejects cancellation without treating delivery as a stock return", async (t) => {
+    const original = storedSale({
+        status: "teslim_edildi", delivered_at: "2026-10-01T10:00:00.000Z", delivered_by: userId,
+        stock_deductions: [{ product: productId, quantity: 2 }],
+    });
+    const db = database(t, { sales: [original], products: [storedProduct({ stock_quantity: 8 })] });
+    const response = await db.request(cancelSale);
+    assert.equal(response.statusCode, 409);
+    assert.match(response.body.message, /Teslim edilmiş sipariş iptal edilemez/);
+    assert.deepEqual(db.sale(), original);
+    assert.equal(db.stock(), 8);
+    assert.equal(db.stockWrites.length, 0);
+    assert.equal(db.saleWrites.length, 0);
+});
+
+test("delivered order rejects reapproval, reopening, financial and item changes", async (t) => {
+    const original = storedSale({ status: "teslim_edildi", delivered_at: "2026-10-01T10:00:00.000Z" });
+    const db = database(t, { sales: [original], products: [storedProduct({ stock_quantity: 8 })] });
+    for (const body of [{ status: "tamamlandi" }, { status: "beklemede" }, { grand_total: 999 }, { sale_items: [item()] }]) {
+        const response = await db.request(updateSale, body);
+        assert.equal(response.statusCode, 409);
+        assert.match(response.body.message, /Teslim edilmiş sipariş değiştirilemez/);
+    }
+    assert.deepEqual(db.sale(), original);
+    assert.equal(db.stock(), 8);
+    assert.equal(db.stockWrites.length, 0);
+    assert.equal(db.saleWrites.length, 0);
+});
+
+test("direct create or pending update cannot bypass the delivery endpoint", async (t) => {
+    const original = storedSale({ status: "beklemede" });
+    const db = database(t, { sales: [original], products: [storedProduct()] });
+    const created = await db.request(createSale, payload({ status: "teslim_edildi" }));
+    const updated = await db.request(updateSale, { status: "teslim_edildi" });
+    assert.equal(created.statusCode, 400);
+    assert.equal(updated.statusCode, 400);
+    assert.deepEqual(db.sale(), original);
+    assert.equal(db.stockWrites.length, 0);
+    assert.equal(db.saleWrites.length, 0);
+});
+
+test("delivery of a missing order returns 404 without writes", async (t) => {
+    const db = database(t, { products: [storedProduct()] });
+    const response = await db.request(deliverSale);
+    assert.equal(response.statusCode, 404);
+    assert.equal(db.stockWrites.length, 0);
+    assert.equal(db.saleWrites.length, 0);
+});
+
+test("dashboard revenue and recent sales retain delivered jobs and exclude non-won orders", async (t) => {
+    const records = [
+        storedSale({ status: "tamamlandi", sale_items: [item(productId, 8)] }),
+        storedSale({ _id: otherProductId, status: "teslim_edildi", sale_items: [item(productId, 12)] }),
+        storedSale({ status: "beklemede", sale_items: [item(productId, 4)] }),
+        storedSale({ status: "kaybedildi", sale_items: [item(productId, 5)] }),
+        storedSale({ status: "iptal", sale_items: [item(productId, 9)] }),
+    ];
+    const filters = [];
+    const chain = (values) => ({
+        select() { return this; }, populate() { return this; }, sort() { return this; }, limit() { return this; },
+        then(resolve, reject) { return Promise.resolve(values).then(resolve, reject); },
+    });
+    t.mock.method(Sale, "find", (filter) => {
+        filters.push(clone(filter));
+        const requested = filter.status?.$in || [filter.status];
+        return chain(records.filter((record) => requested.includes(record.status)));
+    });
+    t.mock.method(Product, "countDocuments", async () => 12);
+    t.mock.method(Product, "find", () => chain([]));
+    const response = {
+        statusCode: 200, body: null,
+        status(code) { this.statusCode = code; return this; },
+        json(value) { this.body = value; return this; },
+    };
+    await getDashboardStats({}, response);
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.totalRevenue, 200, "delivery must retain won revenue without counting cancelled or pending totals");
+    assert.equal(response.body.totalSalesCount, 2);
+    assert.equal(response.body.totalProducts, 12);
+    assert.deepEqual(response.body.recentSales.map((record) => record.status).sort(), ["tamamlandi", "teslim_edildi"]);
+    assert.equal(filters.length, 2);
+    for (const filter of filters) assert.deepEqual(filter.status.$in?.slice().sort(), ["tamamlandi", "teslim_edildi"]);
 });
