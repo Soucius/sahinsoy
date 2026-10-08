@@ -21,6 +21,8 @@ const saleSchema = new mongoose.Schema({
     lost_at: { type: Date, default: null },
     cancelled_at: { type: Date, default: null },
     cancelled_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    delivered_at: { type: Date, default: null },
+    delivered_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     stock_deductions: {
         type: [new mongoose.Schema({
             product: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
@@ -40,7 +42,7 @@ const saleSchema = new mongoose.Schema({
     payment_method: { type: String, default: "Nakit" },
     status: { 
         type: String, 
-        enum: ["beklemede", "tamamlandi", "kaybedildi", "iptal"],
+        enum: ["beklemede", "tamamlandi", "kaybedildi", "iptal", "teslim_edildi"],
         default: "tamamlandi" 
     },
     customer_name: { type: String, default: "" },
