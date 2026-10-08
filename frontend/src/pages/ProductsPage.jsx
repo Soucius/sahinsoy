@@ -60,11 +60,15 @@ const ProductsPage = () => {
   const [formData, setFormData] = useState(initialFormState);
   const [isImporting,setIsImporting]=useState(false);
   const [catalogText,setCatalogText]=useState('');
-  const handleCatalogTextImport=async()=>{setIsImporting(true);try{const data=JSON.parse(catalogText);if(!Array.isArray(data.products))throw new Error('Katalog biçimi geçersiz.');const response=await api.post('/products/import-catalog',data);setCatalogText('');toast.success(response.data.message);await fetchFilters();await fetchProducts();}catch(error){toast.error(error.response?.data?.message||'Katalog metni aktarılamadı.');}finally{setIsImporting(false);}};
+  const importPreparedCatalog=(data)=>{
+    if(!Array.isArray(data.products))throw new Error('Katalog veya renk/VR listesi geçersiz.');
+    return api.post(data.kind==='variant-enrichment'?'/products/import-variants':'/products/import-catalog',data);
+  };
+  const handleCatalogTextImport=async()=>{setIsImporting(true);try{const data=JSON.parse(catalogText);const response=await importPreparedCatalog(data);setCatalogText('');toast.success(response.data.message);await fetchFilters();await fetchProducts();}catch(error){toast.error(error.response?.data?.message||'Katalog veya renk/VR metni aktarılamadı.');}finally{setIsImporting(false);}};
   const handleCatalogImport=async(e)=>{
     const file=e.target.files?.[0];if(!file)return;
     setIsImporting(true);
-    try{const data=JSON.parse(await file.text());if(!Array.isArray(data.products))throw new Error('Geçersiz katalog dosyası.');const response=await api.post('/products/import-catalog',data);toast.success(response.data.message);await fetchFilters();await fetchProducts();}catch(error){toast.error(error.response?.data?.message||'Katalog dosyası aktarılamadı.');}finally{setIsImporting(false);e.target.value='';}
+    try{const data=JSON.parse(await file.text());const response=await importPreparedCatalog(data);toast.success(response.data.message);await fetchFilters();await fetchProducts();}catch(error){toast.error(error.response?.data?.message||'Katalog veya renk/VR dosyası aktarılamadı.');}finally{setIsImporting(false);e.target.value='';}
   };
 
   useEffect(() => {
@@ -273,8 +277,8 @@ const ProductsPage = () => {
           <Plus size={20} /> Yeni Ürün Ekle
         </button>
       </div>
-      <div className="flex items-center gap-3 mb-4"><label className="px-4 py-3 rounded-lg border cursor-pointer bg-white">{isImporting?'Katalog aktarılıyor…':'Katalog dosyasını içe aktar'}<input aria-label="Katalog dosyası" type="file" accept="application/json,.json" disabled={isImporting} onChange={handleCatalogImport} className="hidden"/></label><span className="text-sm text-gray-600">{pagination.totalProducts} kayıtlı ürün · Renk ve VR bilgileri ürün düzenleme alanında.</span></div>
-      <details className="mb-4 border rounded-xl bg-white p-4"><summary className="cursor-pointer font-semibold">Katalog metniyle aktarım</summary><p className="text-sm my-3">Hazırlanmış katalog verisini buradan test veritabanına aktarabilirsiniz. Mevcut ürünlerin bilgileri korunur.</p><textarea aria-label="Katalog metni" value={catalogText} onChange={e=>setCatalogText(e.target.value)} rows={3} className="w-full border rounded-lg p-3"/><button disabled={isImporting||!catalogText} onClick={handleCatalogTextImport} className="border rounded-lg px-5 mt-3">{isImporting?'Aktarılıyor…':'Katalog metnini aktar'}</button></details>
+      <div className="flex items-center gap-3 mb-4"><label className="px-4 py-3 rounded-lg border cursor-pointer bg-white">{isImporting?'Liste aktarılıyor…':'Katalog / renk listesi içe aktar'}<input aria-label="Katalog dosyası" type="file" accept="application/json,.json" disabled={isImporting} onChange={handleCatalogImport} className="hidden"/></label><span className="text-sm text-gray-600">{pagination.totalProducts} kayıtlı ürün · Renk ve VR bilgileri ürün düzenleme alanında.</span></div>
+      <details className="mb-4 border rounded-xl bg-white p-4"><summary className="cursor-pointer font-semibold">Katalog metniyle aktarım</summary><p className="text-sm my-3">Hazırlanmış katalog veya renk/VR listesini test sistemine aktarabilirsiniz. Renk aktarımında mevcut kayıtlar, stoklar ve fiyatlar korunur.</p><textarea aria-label="Katalog metni" value={catalogText} onChange={e=>setCatalogText(e.target.value)} rows={3} className="w-full border rounded-lg p-3"/><button disabled={isImporting||!catalogText} onClick={handleCatalogTextImport} className="border rounded-lg px-5 mt-3">{isImporting?'Aktarılıyor…':'Listeyi aktar'}</button></details>
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4">
         <div className="flex-1 relative">
           <Search
