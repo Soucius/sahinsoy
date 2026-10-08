@@ -49,7 +49,10 @@ export default function PosPage() {
   const lastRoom = useRef("Salon");
   const location = useLocation();
   const navigate = useNavigate();
-  const approved = savedSale?.status === "tamamlandi";
+  const delivered = savedSale?.status === "teslim_edildi";
+  const approved = savedSale?.status === "tamamlandi" || delivered;
+  const cancelled = savedSale?.status === "iptal";
+  const locked = approved || cancelled;
 
   useEffect(() => {
     let active = true;
@@ -115,11 +118,12 @@ export default function PosPage() {
   }, [selected, measurement]);
   const rooms = [...new Set(cart.map((line) => line.room_name))];
   const dirty = () => { setReviewed(false); setSavedSale(null); };
-  const updateHeader = (key, value) => { setHeader((previous) => ({ ...previous, [key]: value })); dirty(); };
+  const updateHeader = (key, value) => { if (locked) return; setHeader((previous) => ({ ...previous, [key]: value })); dirty(); };
   const updateMeasurement = (key, value) => setMeasurement((previous) => ({ ...previous, [key]: value }));
   const updateFilter = (key, value) => setFilters((previous) => ({ ...previous, [key]: value, page: 1 }));
 
   const openProduct = (product) => {
+    if (locked) return;
     setSelected(product);
     setEditId(null);
     setMeasurement({ ...defaultMeasurement(product), room_name: lastRoom.current });
@@ -127,6 +131,7 @@ export default function PosPage() {
   };
 
   const editLine = async (line) => {
+    if (locked) return;
     try {
       const response = await api.get("/products", { params: { search: line.product_name, limit: 100 } });
       const product = response.data.products?.find((item) => item._id === line.product_id);
@@ -139,6 +144,7 @@ export default function PosPage() {
   };
 
   const addLine = () => {
+    if (locked) return;
     if (!measurement.room_name.trim()) { toast.error("Oda / bölüm adını girin."); return; }
     if (!calculation?.line) { toast.error(calculation?.error || "Ölçüleri kontrol edin."); return; }
     const line = { ...calculation.line, id: editId || nextKey() };
@@ -172,7 +178,7 @@ export default function PosPage() {
   };
 
   const saveOrder = async (status) => {
-    if (processingRef.current || approved || !validateHeader()) return;
+    if (processingRef.current || locked || !validateHeader()) return;
     processingRef.current = true;
     setProcessing(true);
     const payload = salePayload(cart, header, discount, status, idempotencyKey.current);
@@ -198,7 +204,7 @@ export default function PosPage() {
     restoredId.current = null; idempotencyKey.current = nextKey();
     navigate("/dashboard/pos", { replace: true, state: null });
   };
-  const printOrder = (kind) => { try { openCurtainPrint(savedSale, kind); } catch (error) { toast.error(error.message); } };
+  const printOrder = (kind) => { if (!approved || cancelled) return; try { openCurtainPrint(savedSale, kind); } catch (error) { toast.error(error.message); } };
   const currency = selected?.currency || selected?.price_currency || "TRY";
   const mode = selected ? productMode(selected) : "standard";
 
@@ -209,18 +215,18 @@ export default function PosPage() {
       <button role="tab" aria-selected={tab === "products"} onClick={() => setTab("products")}><Package size={19} />1 · Ürünler</button>
       <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}><ShoppingCart size={19} />2 · Sipariş özeti ({cart.length})</button>
     </div>
-    {savedSale && <div className={`notice ${approved ? "saved" : ""}`} role="status"><strong>{approved ? "Sipariş onaylandı." : "Teklif beklemede olarak kaydedildi."}</strong> No: #{savedSale._id.slice(-8).toUpperCase()}{approved ? " · İmalat ve müşteri çıktıları aşağıda hazır." : " · Onaylayabilir veya ölçüleri güncelleyebilirsiniz."}</div>}
+    {savedSale && <div className={`notice ${approved ? "saved" : ""}`} role="status"><strong>{cancelled ? "Sipariş iptal edildi." : delivered ? "İş teslim edildi." : approved ? "Sipariş onaylandı." : "Teklif beklemede olarak kaydedildi."}</strong> No: #{savedSale._id.slice(-8).toUpperCase()}{cancelled ? " · Bu kayıt geçmişte korunur; yeniden onaylanamaz ve çıktı hazırlanamaz." : delivered ? ` · ${savedSale.delivered_at ? new Date(savedSale.delivered_at).toLocaleDateString("tr-TR") : ""} Teslim kaydı korunur; müşteri ve imalat PDF'leri aşağıda hazır.` : approved ? " · İmalat ve müşteri çıktıları aşağıda hazır." : " · Onaylayabilir veya ölçüleri güncelleyebilirsiniz."}{cancelled && savedSale.stock_restoration_pending ? " Stok iadesi otomatik tamamlanamadı; ürünlerin stok miktarlarını kontrol edin." : ""}</div>}
     {!savedSale && existingId && <div className="notice">Kayıtlı siparişi düzenliyorsunuz. Değişiklikleri kaydetmek için Beklemede veya Siparişi onayla düğmesini kullanın.</div>}
 
     {tab === "products" ? <section className="panel" role="tabpanel" aria-label="Ürün seçimi">
       <div className="row" style={{ justifyContent: "space-between" }}><h2>Ürün seçin</h2><span className="muted">{totalProducts} ürün</span></div>
-      {approved && <div className="notice">Bu sipariş onaylandı. Yeni bir sipariş için <button onClick={newOrder}><Plus size={16} />Yeni sipariş</button></div>}
+      {locked && <div className="notice">{cancelled ? "Bu sipariş iptal edildi." : delivered ? "Bu iş teslim edildi." : "Bu sipariş onaylandı."} Yeni bir sipariş için <button onClick={newOrder}><Plus size={16} />Yeni sipariş</button></div>}
       <div className="filters">
         <Field label={<span className="row"><Search size={16} />Ürün / desen / barkod ara</span>}><input autoComplete="off" value={filters.search} onChange={(event) => updateFilter("search", event.target.value)} placeholder="Örn. Isabella veya 2506" /></Field>
         <Field label="Marka"><select value={filters.brand} onChange={(event) => updateFilter("brand", event.target.value)}><option value="">Tüm markalar</option>{brands.map((brand) => <option key={brand._id} value={brand._id}>{brand.brand_name}</option>)}</select></Field>
         <Field label="Kategori"><select value={filters.category} onChange={(event) => updateFilter("category", event.target.value)}><option value="">Tüm kategoriler</option>{categories.map((category) => <option key={category._id} value={category._id}>{category.category_name}</option>)}</select></Field>
       </div>
-      {fetchError ? <div className="empty"><p className="error">{fetchError}</p><button onClick={() => setRefresh((value) => value + 1)}>Yeniden dene</button></div> : loading ? <div className="empty" role="status"><Loader2 className="spin" size={28} style={{ margin: "0 auto 10px" }} />Ürünler yükleniyor…</div> : !products.length ? <div className="empty"><Package size={32} style={{ margin: "0 auto" }} /><p>Bu seçimde ürün bulunamadı.</p></div> : <div className="products">{products.map((product) => <button key={product._id} className="product-card" disabled={approved || processing} onClick={() => openProduct(product)}><span className="muted">{product.product_brand?.brand_name} · {product.product_category?.category_name}</span><span className="product-title">{product.product_name}</span>{showFabricSpecs(product) ? <span className="muted">{product.product_color && product.product_color !== "Belirtilmedi" ? product.product_color : "Renk / VR seçimi ürün içinde"}</span> : null}{showFabricSpecs(product) && (product.fabric_width_cm || product.grammage_gr) ? <span className="muted">Kumaş eni {product.fabric_width_cm || "—"} cm · {product.grammage_gr || "—"} g</span> : null}<span className="product-price">{formatMoney(product.sale_price, product.currency || product.price_currency || "TRY")} <span className="muted">/ {product.calculation_type === "m2" ? "m²" : product.calculation_type === "mt" ? "m" : "adet"}</span></span></button>)}</div>}
+      {fetchError ? <div className="empty"><p className="error">{fetchError}</p><button onClick={() => setRefresh((value) => value + 1)}>Yeniden dene</button></div> : loading ? <div className="empty" role="status"><Loader2 className="spin" size={28} style={{ margin: "0 auto 10px" }} />Ürünler yükleniyor…</div> : !products.length ? <div className="empty"><Package size={32} style={{ margin: "0 auto" }} /><p>Bu seçimde ürün bulunamadı.</p></div> : <div className="products">{products.map((product) => <button key={product._id} className="product-card" disabled={locked || processing} onClick={() => openProduct(product)}><span className="muted">{product.product_brand?.brand_name} · {product.product_category?.category_name}</span><span className="product-title">{product.product_name}</span>{showFabricSpecs(product) ? <span className="muted">{product.product_color && product.product_color !== "Belirtilmedi" ? product.product_color : "Renk / VR seçimi ürün içinde"}</span> : null}{showFabricSpecs(product) && (product.fabric_width_cm || product.grammage_gr) ? <span className="muted">Kumaş eni {product.fabric_width_cm || "—"} cm · {product.grammage_gr || "—"} g</span> : null}<span className="product-price">{formatMoney(product.sale_price, product.currency || product.price_currency || "TRY")} <span className="muted">/ {product.calculation_type === "m2" ? "m²" : product.calculation_type === "mt" ? "m" : "adet"}</span></span></button>)}</div>}
       <div className="row pagination"><button disabled={filters.page <= 1 || loading} onClick={() => setFilters((previous) => ({ ...previous, page: previous.page - 1 }))}><ArrowLeft size={17} />Önceki</button><span className="muted">Sayfa {filters.page} / {pages}</span><button disabled={filters.page >= pages || loading} onClick={() => setFilters((previous) => ({ ...previous, page: previous.page + 1 }))}>Sonraki<ArrowRight size={17} /></button></div>
       <div className="actions divider"><button className="primary" onClick={() => setTab("summary")}>Sonraki: Sipariş özeti ({cart.length})<ArrowRight size={18} /></button></div>
     </section> : <div role="tabpanel" aria-label="Sipariş özeti">
@@ -234,11 +240,11 @@ export default function PosPage() {
             {line.labor_total > 0 && <p>İşçilik: {formatNumber(line.quantity)} m × {formatMoney(line.labor_unit_price)} = {formatMoney(line.labor_total)}</p>}
             {line.accessories?.map((option, index) => <p className="muted" key={index}>{option.name}: {formatNumber(option.quantity)} {option.unit} × {formatMoney(option.unit_price)} = {formatMoney(option.total)}</p>)}
             {line.item_note && <p className="muted">Not: {line.item_note}</p>}
-            <div className="line-price"><span>{formatMoney(line.item_total)}</span>{!approved && <div className="row"><button disabled={processing} onClick={() => editLine(line)}>Düzenle</button><button className="button-danger" aria-label={`${line.product_name} kalemini kaldır`} disabled={processing} onClick={() => { setCart((previous) => previous.filter((item) => item.id !== line.id)); dirty(); }}><Trash2 size={16} />Kaldır</button></div>}</div>
+            <div className="line-price"><span>{formatMoney(line.item_total)}</span>{!locked && <div className="row"><button disabled={processing} onClick={() => editLine(line)}>Düzenle</button><button className="button-danger" aria-label={`${line.product_name} kalemini kaldır`} disabled={processing} onClick={() => { setCart((previous) => previous.filter((item) => item.id !== line.id)); dirty(); }}><Trash2 size={16} />Kaldır</button></div>}</div>
           </article>)}</div>)}
-          <div className="actions divider"><button disabled={processing || approved} onClick={() => setTab("products")}><ArrowLeft size={18} />Ürün eklemeye dön</button></div>
+          <div className="actions divider"><button disabled={processing || locked} onClick={() => setTab("products")}><ArrowLeft size={18} />Ürün eklemeye dön</button></div>
         </section>
-        <section className="panel"><h2>Müşteri ve teslim bilgileri</h2><fieldset disabled={processing || approved}><div className="fields">
+        <section className="panel"><h2>Müşteri ve teslim bilgileri</h2><fieldset disabled={processing || locked}><div className="fields">
           <Field label="Müşteri adı"><input value={header.first_name} onChange={(event) => updateHeader("first_name", event.target.value)} autoComplete="given-name" maxLength={100} placeholder="Ad" required /></Field>
           <Field label="Müşteri soyadı"><input value={header.last_name} onChange={(event) => updateHeader("last_name", event.target.value)} autoComplete="family-name" maxLength={100} placeholder="Soyad" required /></Field>
           <Field label="İletişim numarası"><input type="tel" value={header.customer_phone} onChange={(event) => updateHeader("customer_phone", event.target.value)} autoComplete="tel" maxLength={30} placeholder="05xx xxx xx xx" /></Field>
@@ -252,12 +258,12 @@ export default function PosPage() {
       </div>
       {reviewed && <div className="review-card" role="status"><strong>{header.first_name} {header.last_name}</strong> · İletişim: {header.customer_phone || "Belirtilmedi"} · Teslim: {header.delivery_date} · {header.delivery_method === "montaj" ? "Montaj" : "Mağaza teslimi"}<p>{cart.length} ürün kalemi / {rooms.length} oda · İskonto %{totals.discountPercent} ({formatMoney(totals.discountAmount)}) · Ödenecek {formatMoney(totals.total)}</p></div>}
       <div className="actions divider">
-        <button disabled={!cart.length || processing || approved} onClick={() => { if (validateHeader()) setReviewed(true); }}><ClipboardList size={18} />Siparişi gözden geçir</button>
-        <button disabled={!cart.length || processing || approved} onClick={() => saveOrder("beklemede")}>{processing ? <Loader2 className="spin" size={18} /> : null}Beklemede</button>
-        <button className="primary" disabled={!cart.length || processing || approved} onClick={() => saveOrder("tamamlandi")}>{processing ? <Loader2 className="spin" size={18} /> : <CheckCircle size={18} />}Siparişi onayla</button>
+        <button disabled={!cart.length || processing || locked} onClick={() => { if (validateHeader()) setReviewed(true); }}><ClipboardList size={18} />Siparişi gözden geçir</button>
+        <button disabled={!cart.length || processing || locked} onClick={() => saveOrder("beklemede")}>{processing ? <Loader2 className="spin" size={18} /> : null}Beklemede</button>
+        <button className="primary" disabled={!cart.length || processing || locked} onClick={() => saveOrder("tamamlandi")}>{processing ? <Loader2 className="spin" size={18} /> : <CheckCircle size={18} />}Siparişi onayla</button>
       </div>
-      <div className="actions divider"><button disabled={!approved || processing} onClick={() => printOrder("customer")}><Printer size={18} />Müşteri sipariş kağıdı · A4 / PDF</button><button disabled={!approved || processing} onClick={() => printOrder("manufacturing")}><Printer size={18} />Atölye takip formu · A4 / PDF</button>{approved && <button onClick={newOrder}><Plus size={18} />Yeni sipariş</button>}</div>
-      {!approved && <p className="muted" style={{ marginTop: 12 }}>İmalat ve müşteri çıktıları, sipariş onaylanıp kaydedildikten sonra açılır.</p>}
+      <div className="actions divider"><button disabled={!approved || processing} onClick={() => printOrder("customer")}><Printer size={18} />Müşteri sipariş kağıdı · A4 / PDF</button><button disabled={!approved || processing} onClick={() => printOrder("manufacturing")}><Printer size={18} />Atölye takip formu · A4 / PDF</button>{locked && <button onClick={newOrder}><Plus size={18} />Yeni sipariş</button>}</div>
+      {!locked && <p className="muted" style={{ marginTop: 12 }}>İmalat ve müşteri çıktıları, sipariş onaylanıp kaydedildikten sonra açılır.</p>}
     </div>}
 
     {selected && measurement && <div className="modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) setSelected(null); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="pos-product-heading">
