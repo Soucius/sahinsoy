@@ -7,7 +7,7 @@ export const PLEATS = [
   { id: "s", name: "S pile", factor: 3 },
 ];
 
-export const ROOM_PRESETS = ["Salon", "Oturma Odası", "Yatak Odası", "Çocuk Odası", "Mutfak", "Balkon", "Misafir Odası", "Hobi Odası", "Sinema Odası", "Çalışma Odası"];
+export const ROOM_PRESETS = ["Salon", "Oturma Odası", "Yatak Odası", "Çocuk Odası", "Erkek Çocuk Odası", "Kız Çocuk Odası", "Genç Odası", "Giyinme Odası", "Sinema Odası", "Hobi Odası", "Oyun Odası", "Çalışma Odası", "Misafir Odası", "Bebek Odası", "Yemek Odası", "Mutfak", "Balkon", "Antre", "Teras"];
 export const FACADES = ["Kuzey Cephe", "Güney Cephe", "Doğu Cephe", "Batı Cephe"];
 export const WINDOWS = ["Fransız Cam", "Standart Pencere", "Sürgülü Cam", "Kemerli Cam", "Boydan Cam"];
 
