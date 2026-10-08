@@ -29,6 +29,13 @@ export function needsControlDirection(product) {
   return productMode(product) === "mechanical" && /stor|zebra|jaluzi/.test(category);
 }
 
+export function mechanicalPanelPosition(index, count) {
+  if (count === 1) return "Tek parça";
+  if (index === 0) return "Sol";
+  if (index === count - 1) return "Sağ";
+  return count === 3 ? "Orta" : `Orta ${index}`;
+}
+
 export function defaultMeasurement(product) {
   const mode = productMode(product);
   return {
@@ -126,7 +133,7 @@ export function calculateCurtainLine(product, form) {
         if (!["Sağ", "Sol"].includes(panel.chain_direction)) throw new Error(`${index + 1}. parça için zincir / ip yönünü seçin.`);
         const variant = String(panel.variant || form.variant || "").trim();
         if (variant.length > 150) throw new Error(`${index + 1}. parçanın renk / VR bilgisi çok uzun.`);
-        return { label: `${index + 1}. Parça`, width: panelWidth, height: panelHeight, chain_direction: panel.chain_direction, variant, ...billedArea(panelWidth, panelHeight) };
+        return { label: `${index + 1}. Parça`, position: mechanicalPanelPosition(index, form.mechanical_panels.length), width: panelWidth, height: panelHeight, chain_direction: panel.chain_direction, variant, ...billedArea(panelWidth, panelHeight) };
       });
       width = roundQuantity(mechanicalPanels.reduce((sum, panel) => sum + panel.width, 0));
       height = Math.max(...mechanicalPanels.map((panel) => panel.height));
@@ -135,7 +142,7 @@ export function calculateCurtainLine(product, form) {
       pieces = count * mechanicalPanels.length;
       caseCount = caseMode === "ortak" ? count : pieces;
       quantity = mechanicalPanels.reduce((sum, panel) => sum + panel.billable_area, 0) * count;
-      note = `${count} düzen × ${mechanicalPanels.length} parça · ${caseCount} ${caseMode === "ortak" ? "ortak" : "ayrı"} kasa · her parça ayrı hesaplanır · toplam kasa eni ${formatNumber(width)} cm`;
+      note = `${count} düzen × ${mechanicalPanels.length} parça · ${caseCount} ${caseMode === "ortak" ? "ortak" : "ayrı"} kasa · her parça ayrı hesaplanır · toplam parça eni ${formatNumber(width)} cm`;
     } else {
       const billing = billedArea(width, height);
       billableWidth = billing.billable_width;
@@ -205,7 +212,7 @@ export function orderTotals(cart, discountPercent) {
 
 export function salePayload(cart, header, percent, status, existingIdempotencyKey) {
   const totals = orderTotals(cart, percent);
-  const panelNote = (line) => line.mechanical_panels?.length ? [`${line.case_count} ${line.case_mode === "ortak" ? "ortak" : "ayrı"} kasa · ${line.pieces} parça`, ...line.mechanical_panels.map((panel) => `${panel.label}: ${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm${panel.variant ? ` · Renk / VR: ${panel.variant}` : ""} · Zincir / ip yönü: ${panel.chain_direction}`)].join(" / ") : "";
+  const panelNote = (line) => line.mechanical_panels?.length ? [`${line.case_count} ${line.case_mode === "ortak" ? "ortak" : "ayrı"} kasa · ${line.pieces} parça`, ...line.mechanical_panels.map((panel) => `${panel.label}${panel.position ? ` (${panel.position})` : ""}: ${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm${panel.variant ? ` · Renk / VR: ${panel.variant}` : ""} · Zincir / ip yönü: ${panel.chain_direction}`)].join(" / ") : "";
   return {
     sale_items: cart.map((line) => ({ product: line.product_id, quantity: line.quantity, width: line.width, height: line.height, unit_price: line.unit_price, total_price: line.item_total, room_name: [line.room_name, line.area].filter(Boolean).join(" / "), facade: line.facade, window_name: line.window_name, item_note: [line.variant ? `Renk / VR: ${line.variant}` : "", line.chain_direction ? `Zincir / ip yönü: ${line.chain_direction}` : "", panelNote(line), line.pleat_name, line.item_note].filter(Boolean).join(" · ") })),
     sub_total: totals.subtotal, discount_amount: totals.discountAmount, discount_percent: totals.discountPercent, credit_card_fee: 0, grand_total: totals.total,
