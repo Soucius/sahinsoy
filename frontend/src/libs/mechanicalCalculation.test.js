@@ -275,3 +275,24 @@ test("left-to-right factory positions stay independent of chain direction and se
   assert.deepEqual(restoreSaleDraft(payload).cart[0].mechanical_panels.map((panel) => panel.position), ["Sol", "Orta", "Sağ"]);
   for (const [count, expected] of [[1, ["Tek parça"]], [2, ["Sol", "Sağ"]], [5, ["Sol", "Orta 1", "Orta 2", "Orta 3", "Sağ"]]]) assert.deepEqual(Array.from({ length: count }, (_, index) => mechanicalPanelPosition(index, count)), expected);
 });
+
+test("a single separate case may keep a manual right position independently of its left chain", () => {
+  const panel = { width: "80", height: "250", chain_direction: "Sol", variant: "VR390 · Ekru" };
+  const automatic = caseLine(defaultMeasurement(stor).case_mode, { mechanical_panels: [panel] });
+  const manual = caseLine(defaultMeasurement(stor).case_mode, { mechanical_panels: [{ ...panel, position_override: "Sağ" }] });
+  assert.equal(automatic.case_mode, "ayri");
+  assert.equal(automatic.mechanical_panels[0].position, "Tek parça");
+  assert.equal(automatic.mechanical_panels[0].position_override, "", "automatic position remains automatic when editing");
+  assert.equal(manual.mechanical_panels[0].position, "Sağ");
+  assert.equal(manual.mechanical_panels[0].position_override, "Sağ");
+  assert.equal(manual.mechanical_panels[0].chain_direction, "Sol");
+  assert.equal(manual.quantity, automatic.quantity);
+  assert.equal(manual.item_total, automatic.item_total);
+  const payload = salePayload([manual], { first_name: "Deneme", last_name: "Müşteri" }, 0, "beklemede", "manual-position-test-key");
+  const restored = restoreSaleDraft(payload).cart[0].mechanical_panels[0];
+  assert.equal(restored.position_override, "Sağ");
+  assert.equal(restored.position, "Sağ");
+  assert.equal(restored.chain_direction, "Sol");
+  assert.ok(payload.sale_items[0].item_note.includes("1. Parça (Sağ)"));
+  for (const value of [null, "sol", "Sağ kasa", "Orta 1", "Yukarı"]) assert.throws(() => caseLine("ayri", { mechanical_panels: [{ ...panel, position_override: value }] }), /konumunu seçin/);
+});
