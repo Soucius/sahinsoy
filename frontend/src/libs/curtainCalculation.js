@@ -14,6 +14,7 @@ export const WINDOWS = ["Fransız Cam", "Standart Pencere", "Sürgülü Cam", "K
 export const roundMoney = (number) => Math.round((number + Number.EPSILON) * 100) / 100;
 export const roundQuantity = (number) => Math.round((number + Number.EPSILON) * 10000) / 10000;
 export const normalizeName = (text) => String(text || "").toLocaleLowerCase("tr-TR").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "i");
+export const showFabricSpecs = (record) => normalizeName(record?.brand_name || record?.product_brand?.brand_name) !== "laferra";
 export const formatNumber = (number, decimals = 2) => Number(number || 0).toLocaleString("tr-TR", { maximumFractionDigits: decimals, minimumFractionDigits: decimals });
 export const formatMoney = (number, currency = "TRY") => Number(number || 0).toLocaleString("tr-TR", { style: "currency", currency: ["TRY", "USD", "EUR"].includes(currency) ? currency : "TRY" });
 
@@ -113,7 +114,7 @@ export function calculateCurtainLine(product, form) {
   return {
     product_id: product._id, product_name: product.product_name,
     brand_name: product.product_brand?.brand_name || product.brand_name || "", category_name: product.product_category?.category_name || product.category_name || "",
-    fabric_width_cm: Number(product.fabric_width_cm) || 0, grammage_gr: Number(product.grammage_gr) || 0,
+    ...(showFabricSpecs(product) ? { fabric_width_cm: Number(product.fabric_width_cm) || 0, grammage_gr: Number(product.grammage_gr) || 0 } : {}),
     mode, calc_type: type, width, height, pieces, count, order_mode: form.order_mode, panels,
     quantity, unit_label: type === "mt" ? "m" : type === "m2" ? "m²" : "adet", pleat_name: mode === "textile" || mode === "fon" ? pleat.name : "", pleat_factor: pleat.factor,
     base_unit_price: basePrice, material_total: materialTotal, labor_unit_price: laborPrice, labor_total: laborTotal, accessories, accessories_total: accessoriesTotal,
