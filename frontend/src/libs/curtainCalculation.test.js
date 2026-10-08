@@ -115,12 +115,19 @@ test("POS payload gerçek backend toplam ve satır doğrulamasından geçer", ()
   assert.equal(normalized.sale_items[0].quantity, 12.8);
   assert.equal(normalized.grand_total, 6608);
 });
-test("Laferra kumaş eni ve gramaj müşteride ve imalatta korunur", () => {
+test("Laferra kart ve çıktılarında katalog eni/gramajı gizlenir, sipariş ölçüsü korunur", () => {
   const line = measured({ ...textile, fabric_width_cm: 330, grammage_gr: 260, product_name: "6466" }, { count: "1" });
-  assert.equal(line.fabric_width_cm, 330);
-  assert.equal(line.grammage_gr, 260);
-  assert.ok(createCustomerOrderHtml(saved([line])).includes("Gramaj 260,00 g"));
-  assert.ok(createManufacturingHtml(saved([line])).includes("260,00 g"));
+  assert.equal(line.fabric_width_cm, undefined);
+  assert.equal(line.grammage_gr, undefined);
+  const legacyLine={...line,fabric_width_cm:330,grammage_gr:260};
+  for(const html of [createCustomerOrderHtml(saved([legacyLine])),createManufacturingHtml(saved([legacyLine]))]){
+    assert.ok(!html.includes("Kumaş eni"));
+    assert.ok(!html.includes("Gramaj"));
+    assert.ok(!html.includes("260,00 g"));
+    assert.ok(html.includes("6466"));
+    assert.ok(html.includes("260,00 cm"));
+  }
+  assert.ok(createCustomerOrderHtml(saved([line])).includes("₺500,00"));
 });
 test("eski tutarlı iskonto ve teslim yöntemi yeni forma doğru taşınır", () => {
   const restored = restoreSaleDraft({ customer_name: "Deneme Müşteri", sub_total: 100, discount_amount: 10, discount_percent: 0, delivery_method: "installation", sale_items: [] });
