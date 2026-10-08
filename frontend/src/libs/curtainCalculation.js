@@ -131,9 +131,11 @@ export function calculateCurtainLine(product, form) {
         const panelWidth = positive(panel.width, `${index + 1}. parça eni`);
         const panelHeight = positive(panel.height, `${index + 1}. parça boyu`);
         if (!["Sağ", "Sol"].includes(panel.chain_direction)) throw new Error(`${index + 1}. parça için zincir / ip yönünü seçin.`);
+        const positionOverride = panel.position_override === undefined ? "" : panel.position_override;
+        if (!["", "Sol", "Orta", "Sağ"].includes(positionOverride)) throw new Error(`${index + 1}. parçanın konumunu seçin.`);
         const variant = String(panel.variant || form.variant || "").trim();
         if (variant.length > 150) throw new Error(`${index + 1}. parçanın renk / VR bilgisi çok uzun.`);
-        return { label: `${index + 1}. Parça`, position: mechanicalPanelPosition(index, form.mechanical_panels.length), width: panelWidth, height: panelHeight, chain_direction: panel.chain_direction, variant, ...billedArea(panelWidth, panelHeight) };
+        return { label: `${index + 1}. Parça`, position: positionOverride || mechanicalPanelPosition(index, form.mechanical_panels.length), position_override: positionOverride, width: panelWidth, height: panelHeight, chain_direction: panel.chain_direction, variant, ...billedArea(panelWidth, panelHeight) };
       });
       width = roundQuantity(mechanicalPanels.reduce((sum, panel) => sum + panel.width, 0));
       height = Math.max(...mechanicalPanels.map((panel) => panel.height));
