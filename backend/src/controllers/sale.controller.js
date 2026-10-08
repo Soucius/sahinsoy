@@ -65,6 +65,7 @@ export async function updateSale(req,res){
       const existing=await Sale.findById(req.params.id).session(session);
       if(!existing)throw new SaleInputError('Sipariş bulunamadı.',404);
       if(existing.status==='iptal')throw new SaleInputError('İptal edilmiş sipariş değiştirilemez. Yeni bir sipariş oluşturun.',409);
+      if(existing.status==='teslim_edildi')throw new SaleInputError('Teslim edilmiş sipariş değiştirilemez.',409);
       if(existing.status==='tamamlandi'){
         const financial=Object.keys(req.body).filter(k=>!['sale_items'].includes(k));
         if(financial.length){if(req.body.status==='tamamlandi'){savedId=existing._id;return;}throw new SaleInputError('Onaylanmış siparişin tutarı ve durumu değiştirilemez.');}
@@ -91,10 +92,32 @@ export async function cancelSale(req,res){
       const sale=await Sale.findById(req.params.id).session(session);
       if(!sale)throw new SaleInputError('Sipariş bulunamadı.',404);
       if(sale.status==='iptal'){savedId=sale._id;return;}
+      if(sale.status==='teslim_edildi')throw new SaleInputError('Teslim edilmiş sipariş iptal edilemez.',409);
       sale.stock_restoration_pending=sale.status==='tamamlandi'?await restoreStock(sale,session):false;
       sale.status='iptal';
       sale.cancelled_at=new Date();
       sale.cancelled_by=req.user._id;
+      await sale.save({session});
+      savedId=sale._id;
+    });
+    res.json(await populate(Sale.findById(savedId)));
+  }catch(error){failure(error,res);}finally{await session.endSession();}
+}
+
+export async function deliverSale(req,res){
+  const session=await mongoose.startSession();
+  try{
+    let savedId;
+    await session.withTransaction(async()=>{
+      const sale=await Sale.findById(req.params.id).session(session);
+      if(!sale)throw new SaleInputError('Sipariş bulunamadı.',404);
+      if(sale.status==='teslim_edildi'){savedId=sale._id;return;}
+      if(sale.status!=='tamamlandi')throw new SaleInputError('Yalnız onaylanmış sipariş teslim edildi olarak işaretlenebilir.',409);
+      // Delivery is fulfillment, so retain the original approval month and stock.
+      if(!sale.approved_at)sale.approved_at=sale.updatedAt||sale.createdAt||new Date();
+      sale.status='teslim_edildi';
+      sale.delivered_at=new Date();
+      sale.delivered_by=req.user._id;
       await sale.save({session});
       savedId=sale._id;
     });
