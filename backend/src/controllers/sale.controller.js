@@ -7,6 +7,7 @@ const pick=data=>Object.fromEntries(allowed.filter(k=>data[k]!==undefined).map(k
 const populate=q=>q.populate({path:'sale_items.product',select:'product_name product_barcode product_image calculation_type product_unit product_category product_brand stock_tracking stock_quantity sale_price variants currency',populate:[{path:'product_unit',select:'unit_name unit_code'},{path:'product_category',select:'category_name'},{path:'product_brand',select:'brand_name'}]}).populate('sold_by','user_username');
 async function deductStock(items,session){
   const quantities=new Map();
+  const deductions=[];
   for(const x of items)quantities.set(String(x.product),(quantities.get(String(x.product))||0)+x.quantity);
   for(const [id,quantity] of quantities){
     const product=await Product.findById(id).session(session);
@@ -14,7 +15,22 @@ async function deductStock(items,session){
     if(product.stock_tracking===false)continue;
     const updated=await Product.updateOne({_id:id,stock_quantity:{$gte:quantity}},{$inc:{stock_quantity:-quantity}},{session});
     if(updated.modifiedCount!==1)throw new SaleInputError(`${product.product_name} için stok yetersiz. Mevcut: ${product.stock_quantity}`);
+    deductions.push({product:product._id,quantity});
   }
+  return deductions;
+}
+async function restoreStock(sale,session){
+  // A missing ledger on an old order does not prove a historical stock deduction.
+  if(!Array.isArray(sale.stock_deductions))return true;
+  // Check every product first: missing products defer the whole refund for review.
+  for(const entry of sale.stock_deductions){
+    if(!await Product.findById(entry.product).session(session))return true;
+  }
+  for(const entry of sale.stock_deductions){
+    const restored=await Product.updateOne({_id:entry.product},{$inc:{stock_quantity:entry.quantity}},{session});
+    if(restored.modifiedCount!==1)throw new SaleInputError('Stok iadesi tamamlanamadı; sipariş iptal edilmedi.',409);
+  }
+  return false;
 }
 function failure(error,res){
   if(error instanceof SaleInputError)return res.status(error.status).json({message:error.message});
@@ -30,7 +46,7 @@ export async function createSale(req,res){
     await session.withTransaction(async()=>{
       if(data.client_request_id){const prior=await Sale.findOne({client_request_id:data.client_request_id,sold_by:req.user._id}).session(session);if(prior){saved=prior;return;}}
       const sale=new Sale({...data,sold_by:req.user._id,approved_at:data.status==='tamamlandi'?new Date():null,lost_at:data.status==='kaybedildi'?new Date():null});await sale.validate();
-      if(data.status==='tamamlandi')await deductStock(data.sale_items,session);
+      if(data.status==='tamamlandi')sale.stock_deductions=await deductStock(data.sale_items,session);
       saved=await sale.save({session});
     });res.status(201).json(saved);
   }catch(error){
@@ -48,6 +64,7 @@ export async function updateSale(req,res){
     await session.withTransaction(async()=>{
       const existing=await Sale.findById(req.params.id).session(session);
       if(!existing)throw new SaleInputError('Sipariş bulunamadı.',404);
+      if(existing.status==='iptal')throw new SaleInputError('İptal edilmiş sipariş değiştirilemez. Yeni bir sipariş oluşturun.',409);
       if(existing.status==='tamamlandi'){
         const financial=Object.keys(req.body).filter(k=>!['sale_items'].includes(k));
         if(financial.length){if(req.body.status==='tamamlandi'){savedId=existing._id;return;}throw new SaleInputError('Onaylanmış siparişin tutarı ve durumu değiştirilemez.');}
@@ -60,8 +77,27 @@ export async function updateSale(req,res){
       Object.assign(existing,data);await existing.validate();
       if(data.status==='tamamlandi')existing.approved_at=new Date();
       if(data.status==='kaybedildi'&&!existing.lost_at)existing.lost_at=new Date();
-      if(data.status==='tamamlandi')await deductStock(data.sale_items,session);
+      if(data.status==='tamamlandi')existing.stock_deductions=await deductStock(data.sale_items,session);
       await existing.save({session});savedId=existing._id;
     });res.json(await populate(Sale.findById(savedId)));
+  }catch(error){failure(error,res);}finally{await session.endSession();}
+}
+
+export async function cancelSale(req,res){
+  const session=await mongoose.startSession();
+  try{
+    let savedId;
+    await session.withTransaction(async()=>{
+      const sale=await Sale.findById(req.params.id).session(session);
+      if(!sale)throw new SaleInputError('Sipariş bulunamadı.',404);
+      if(sale.status==='iptal'){savedId=sale._id;return;}
+      sale.stock_restoration_pending=sale.status==='tamamlandi'?await restoreStock(sale,session):false;
+      sale.status='iptal';
+      sale.cancelled_at=new Date();
+      sale.cancelled_by=req.user._id;
+      await sale.save({session});
+      savedId=sale._id;
+    });
+    res.json(await populate(Sale.findById(savedId)));
   }catch(error){failure(error,res);}finally{await session.endSession();}
 }
