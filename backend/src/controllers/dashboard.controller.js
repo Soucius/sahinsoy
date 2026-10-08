@@ -3,7 +3,7 @@ import Product from "../models/Product.js";
 
 export async function getDashboardStats(_, res) {
     try {
-        const sales = await Sale.find({ status: "tamamlandi" });
+        const sales = await Sale.find({ status: { $in: ["tamamlandi", "teslim_edildi"] } });
         const totalRevenue = sales.reduce((acc, sale) => acc + sale.grand_total, 0);
         const totalSalesCount = sales.length;
         const totalProducts = await Product.countDocuments();
@@ -14,7 +14,7 @@ export async function getDashboardStats(_, res) {
             .limit(5)
             .sort({ stock_quantity: 1 });
 
-        const recentSales = await Sale.find({ status: "tamamlandi" })
+        const recentSales = await Sale.find({ status: { $in: ["tamamlandi", "teslim_edildi"] } })
             .populate("sold_by", "user_username")
             .sort({ createdAt: -1 })
             .limit(5);
