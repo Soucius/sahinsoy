@@ -33,13 +33,13 @@ const AccountPage = () => {
     try {
       const response = await api.put(`/users/${currentUser._id}`, formData);
 
-      setCurrentUser(response.data);
+      setCurrentUser({ ...response.data, user_role: currentUser.user_role });
 
       toast.success("Hesap bilgileriniz başarıyla güncellendi!");
 
       setFormData((prev) => ({ ...prev, user_password: "" }));
     } catch (error) {
-      console.error("Güncelleme hatası:", error);
+      console.error("Hesap güncelleme isteği başarısız.");
 
       toast.error(
         error.response?.data?.message ||
@@ -159,9 +159,9 @@ const AccountPage = () => {
 
                 <input
                   type="password"
-                  minLength={6}
+                  minLength={12}
                   className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm disabled:bg-gray-100"
-                  placeholder="Değiştirmek için yazın..."
+                  placeholder="En az 12 karakterlik yeni parolanız"
                   value={formData.user_password}
                   onChange={(e) =>
                     setFormData({ ...formData, user_password: e.target.value })
