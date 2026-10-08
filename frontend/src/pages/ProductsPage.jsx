@@ -133,7 +133,7 @@ const ProductsPage = () => {
       ...formData,
       extra_options: [
         ...formData.extra_options,
-        { option_name: "", price_impact: 0, pricing_basis: "birim", currency: "TRY" },
+        { option_name: "", price_impact: 0, pricing_basis: "birim", pricing_scope: "parca", currency: "TRY" },
       ],
     });
   };
@@ -694,6 +694,15 @@ const ProductsPage = () => {
                           <option value="mt">Metre başına</option>
                           <option value="m2">m² başına</option>
                           <option value="yuzde">Ürün bedelinin yüzdesi</option>
+                        </select>
+                        <select
+                          aria-label={`Aksesuar uygulama kapsamı ${index + 1}`}
+                          value={opt.pricing_scope || "parca"}
+                          onChange={(e) => handleOptionChange(index, "pricing_scope", e.target.value)}
+                          className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                        >
+                          <option value="parca">Her parça için</option>
+                          <option value="kasa">Kasa için bir kez</option>
                         </select>
                         {opt.pricing_basis !== "yuzde" && <select
                           aria-label={`Aksesuar para birimi ${index + 1}`}
