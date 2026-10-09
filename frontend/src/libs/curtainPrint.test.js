@@ -18,6 +18,29 @@ const sale = (cart) => ({
   pos_details: { version: 1, cart, header: { first_name: "Deneme", last_name: "Müşteri", delivery_method: "magaza" }, discount_percent: 0 },
 });
 
+test("ön ölçüyle onaylanan siparişin her çıktısında teyit beklediği açıkça yazılır", () => {
+  const provisional = { ...sale([textile]), measurement_status: "preliminary" };
+  for (const render of [createCustomerOrderHtml, createManufacturingHtml]) {
+    const html = render(provisional);
+    assert.ok(html.includes("ÖN ÖLÇÜ · TEYİT BEKLİYOR"));
+    assert.ok(!html.includes("ÖLÇÜ TEYİT EDİLDİ"));
+  }
+});
+
+test("güncel teyitli çıktıda ölçü kayıt numarası ve yeni imalat ölçüleri birlikte görünür", () => {
+  const updated = { ...textile, width: 420, height: 255, panels: [{ label: "Perde", width: 210, height: 255, cut_width: 670 }], quantity: 13.4, material_total: 6700, item_total: 6700 };
+  const confirmed = { ...sale([updated]), measurement_status: "confirmed", measurement_revision: 2 };
+  const manufacturing = createManufacturingHtml(confirmed);
+  assert.ok(manufacturing.includes("ÖLÇÜ TEYİT EDİLDİ"));
+  assert.ok(manufacturing.includes("Ölçü kaydı 2"));
+  assert.ok(manufacturing.includes("Boy 255,00 cm"));
+  assert.ok(manufacturing.includes("Kesim eni 670,00 cm"));
+  assert.ok(!manufacturing.includes("Boy 260,00 cm"));
+  const customer = createCustomerOrderHtml(confirmed);
+  assert.ok(customer.includes("13,40 m"));
+  assert.ok(customer.includes("Ölçü kaydı 2"));
+});
+
 test("mekanik müşteri PDF'si gerçek ölçüyü ve farklı hesap ölçüsünü birlikte gösterir", () => {
   const html = createCustomerOrderHtml(sale([mechanical]));
   assert.ok(html.includes("Ölçü: 91,00 × 181,00 cm"));
