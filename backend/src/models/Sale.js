@@ -17,6 +17,23 @@ const saleItemSchema = new mongoose.Schema({
 
 const saleSchema = new mongoose.Schema({
     client_request_id: { type: String, unique: true, sparse: true },
+    measurement_status: { type: String, enum: ["preliminary", "scheduled", "confirmed"], default: "preliminary" },
+    measurement_date: { type: Date, default: null },
+    measurement_master: { type: String, default: "", maxlength: 120 },
+    measurement_note: { type: String, default: "", maxlength: 2000 },
+    measurement_revision: { type: Number, default: 0, min: 0, validate: Number.isInteger },
+    measurement_history: {
+        type: [new mongoose.Schema({
+            kind: { type: String, enum: ["plan", "measurement"], required: true },
+            revision: { type: Number, required: true, min: 1 },
+            request_id: { type: String, default: "" },
+            changed_at: { type: Date, required: true },
+            changed_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+            before: { type: mongoose.Schema.Types.Mixed, required: true },
+            after: { type: mongoose.Schema.Types.Mixed, required: true }
+        }, { _id: false })],
+        default: []
+    },
     approved_at: { type: Date, default: null },
     lost_at: { type: Date, default: null },
     cancelled_at: { type: Date, default: null },
