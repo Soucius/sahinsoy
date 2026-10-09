@@ -10,6 +10,16 @@ const measured = (product, overrides) => calculateCurtainLine(product, { ...defa
 const header = { first_name: "Deneme", last_name: "Müşteri", customer_phone: "05000000001", delivery_date: "2026-10-20", delivery_method: "montaj", customer_address: "Örnek adres", payment_method: "Nakit" };
 const saved = (cart, discount = 0) => ({ _id: "a123456789abcdef12345678", ...salePayload(cart, header, discount, "tamamlandi", "example-request-key") });
 
+test("planlanmış ölçü randevusu sıradan teklif kaydında geçersiz ilk ölçü durumuna dönüşmez", () => {
+  const line = measured(textile, { count: "2" });
+  const order = { ...saved([line]), status: "beklemede", measurement_status: "scheduled" };
+  const restored = restoreSaleDraft(order);
+  assert.equal(restored.header.measurement_status, "scheduled");
+  const payload = salePayload(restored.cart, restored.header, 0, "beklemede", "example-request-key");
+  assert.equal(Object.hasOwn(payload, "measurement_status"), false);
+  assert.equal(payload.pos_details.header.measurement_status, "scheduled");
+});
+
 test("4 metre sık pile, iki parça: 12,80 metre dikiş payı dahil", () => {
   const line = measured(textile, { count: "2" });
   assert.equal(line.quantity, 12.8);
