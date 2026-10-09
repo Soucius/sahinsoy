@@ -227,7 +227,9 @@ export function salePayload(cart, header, percent, status, existingIdempotencyKe
   return {
     sale_items: cart.map((line) => ({ product: line.product_id, quantity: line.quantity, width: line.width, height: line.height, unit_price: line.unit_price, total_price: line.item_total, room_name: [line.room_name, line.area].filter(Boolean).join(" / "), facade: line.facade, window_name: line.window_name, item_note: [line.variant ? `Renk / VR: ${line.variant}` : "", line.chain_direction ? `Zincir / ip yönü: ${line.chain_direction}` : "", panelNote(line), line.pleat_name, line.item_note].filter(Boolean).join(" · ") })),
     sub_total: totals.subtotal, discount_amount: totals.discountAmount, discount_percent: totals.discountPercent, credit_card_fee: 0, grand_total: totals.total,
-    payment_method: header.payment_method, status, measurement_status: header.measurement_status || "preliminary", customer_name: `${header.first_name || ""} ${header.last_name || ""}`.trim(), customer_phone: header.customer_phone || "", customer_address: header.customer_address || "", delivery_date: header.delivery_date || null, sale_note: header.sale_note || "", delivery_method: header.delivery_method,
+    payment_method: header.payment_method, status,
+    ...(["preliminary", "confirmed"].includes(header.measurement_status || "preliminary") ? { measurement_status: header.measurement_status || "preliminary" } : {}),
+    customer_name: `${header.first_name || ""} ${header.last_name || ""}`.trim(), customer_phone: header.customer_phone || "", customer_address: header.customer_address || "", delivery_date: header.delivery_date || null, sale_note: header.sale_note || "", delivery_method: header.delivery_method,
     client_request_id: existingIdempotencyKey,
     pos_details: { version: 1, cart, header: { ...header }, discount_percent: totals.discountPercent, delivery_method: header.delivery_method },
   };
