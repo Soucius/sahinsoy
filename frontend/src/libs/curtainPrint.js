@@ -58,8 +58,11 @@ function heading(title, sale, pageLabel = "") {
   return `<header class="brand"><img src="__LOGO__" alt="Şahinsoy Perde & Döşemelik"><div><h1>${safe(title)}</h1><p>No: ${safe(String(sale._id || "").slice(-8).toUpperCase())}${revision ? ` · Ölçü kaydı ${number(revision, 0)}` : ""}${pageLabel ? ` · ${safe(pageLabel)}` : ""}</p><p style="font-size:13px;font-weight:bold;line-height:1.2">${safe(label)}</p></div></header>`;
 }
 
-function customerMeta(sale, header) {
-  return `<section class="meta meta-grid"><div><strong>Müşteri:</strong> ${safe(sale.customer_name || [header.first_name, header.last_name].filter(Boolean).join(" "))}</div><div><strong>Telefon:</strong> ${safe(sale.customer_phone || header.customer_phone || "—")}</div><div><strong>Teslim tarihi:</strong> ${date(sale.delivery_date || header.delivery_date)}</div><div><strong>Teslim:</strong> [${["montaj", "installation"].includes(header.delivery_method) || ["montaj", "installation"].includes(sale.delivery_method) ? "X" : " "}] Montaj · [${["montaj", "installation"].includes(header.delivery_method) || ["montaj", "installation"].includes(sale.delivery_method) ? " " : "X"}] Mağaza teslimi</div><div class="full"><strong>Adres:</strong> ${safe(sale.customer_address || header.customer_address || "—")}</div></section>`;
+function customerMeta(sale, header, includeMeasurement = false) {
+  const installation = ["montaj", "installation"].includes(header.delivery_method) || ["montaj", "installation"].includes(sale.delivery_method);
+  const status = sale.measurement_status || header.measurement_status || "preliminary";
+  const measurement = includeMeasurement ? ` · <span style="white-space:nowrap" title="${status === "confirmed" ? "Ölçü teyit edildi" : "Yerinde ölçü / teyit bekleniyor"}">[${status === "confirmed" ? " " : "X"}] Ölçü</span>` : "";
+  return `<section class="meta meta-grid"><div><strong>Müşteri:</strong> ${safe(sale.customer_name || [header.first_name, header.last_name].filter(Boolean).join(" "))}</div><div><strong>Telefon:</strong> ${safe(sale.customer_phone || header.customer_phone || "—")}</div><div><strong>Teslim tarihi:</strong> ${date(sale.delivery_date || header.delivery_date)}</div><div><strong>Teslim:</strong> [${installation ? "X" : " "}] Montaj · [${installation ? " " : "X"}] Mağaza teslimi${measurement}</div><div class="full"><strong>Adres:</strong> ${safe(sale.customer_address || header.customer_address || "—")}</div></section>`;
 }
 
 function lineLocation(line) {
@@ -138,7 +141,7 @@ export function createManufacturingHtml(sale, logoUrl = "/sahinsoy-logo.svg") {
       }
       return `<section class="plan-box"><h2>${safe(line.product_name)}${line.mode === "fon" ? ` · ${box.sequence}. ${line.order_mode === "takim" ? "takım" : "adet"}` : line.mode === "textile" ? ` · ${box.sequence}. parça` : ""}</h2><div>${lineLocation(line)}</div><div>${safe(line.brand_name)}${line.variant ? ` · Renk / VR: ${safe(line.variant)}` : ""}${line.pleat_name ? ` · ${safe(line.pleat_name)}` : ""}</div>${controlDirection(line)}${showFabricSpecs(line) && (line.fabric_width_cm || line.grammage_gr) ? `<div>${line.fabric_width_cm ? `Kumaş eni ${number(line.fabric_width_cm)} cm` : ""}${line.grammage_gr ? ` · ${number(line.grammage_gr)} g` : ""}</div>` : ""}<div class="sketch-row">${box.panels.map((panel) => curtainSketch(line.mode === "fon", panel, fabricLine(line))).join("")}</div><div class="box-total">${fabricLine(line) ? "Giden kumaş" : "Miktar"}: ${number(box.quantity)} ${safe(line.unit_label)}</div>${line.accessories?.length ? `<div>${line.accessories.map((option) => safe(option.name)).join(" · ")}</div>` : ""}${line.item_note ? `<div>Not: ${safe(line.item_note)}</div>` : ""}</section>`;
     }).join("");
-    content += `<main class="sheet plan-sheet">${heading("Atölye Takip Formu", sale, `Sayfa ${page + 1} / ${pageCount}`)}${customerMeta(sale, header)}<div class="plan-grid">${slots}</div>${sale.sale_note || header.sale_note ? `<p class="notes"><strong>Not:</strong> ${safe(sale.sale_note || header.sale_note)}</p>` : ""}<p class="footer">${manufacturingFooter(cart)}</p></main>`;
+    content += `<main class="sheet plan-sheet">${heading("Atölye Takip Formu", sale, `Sayfa ${page + 1} / ${pageCount}`)}${customerMeta(sale, header, true)}<div class="plan-grid">${slots}</div>${sale.sale_note || header.sale_note ? `<p class="notes"><strong>Not:</strong> ${safe(sale.sale_note || header.sale_note)}</p>` : ""}<p class="footer">${manufacturingFooter(cart)}</p></main>`;
   }
   return documentShell("Şahinsoy · Atölye Takip Formu", content, logoUrl);
 }
