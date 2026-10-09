@@ -15,6 +15,7 @@ import ProductsPage from "./pages/ProductsPage";
 import PosPage from "./pages/PosPage";
 import CategoriesPage from "./pages/CategoriesPage";
 import SalesPage from "./pages/SalesPage";
+import SaleMeasurementPage from "./pages/SaleMeasurementPage";
 
 function App() {
   return (
@@ -36,6 +37,7 @@ function App() {
             <Route path="pos" element={<PosPage />} />
             <Route path="categories" element={<CategoriesPage />} />
             <Route path="sales" element={<SalesPage />} />
+            <Route path="sales/:id/measurements" element={<SaleMeasurementPage />} />
           </Route>
         </Route>
       </Routes>
