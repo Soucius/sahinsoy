@@ -52,7 +52,10 @@ function documentShell(title, content, logoUrl) {
 }
 
 function heading(title, sale, pageLabel = "") {
-  return `<header class="brand"><img src="__LOGO__" alt="Şahinsoy Perde & Döşemelik"><div><h1>${safe(title)}</h1><p>No: ${safe(String(sale._id || "").slice(-8).toUpperCase())}</p>${pageLabel ? `<p>${safe(pageLabel)}</p>` : ""}</div></header>`;
+  const revision = Number(sale.measurement_revision) || 0;
+  const status = sale.measurement_status || sale.pos_details?.header?.measurement_status || "preliminary";
+  const label = status === "confirmed" ? "ÖLÇÜ TEYİT EDİLDİ" : status === "scheduled" ? "ÖN ÖLÇÜ · YERİNDE TEYİT PLANLANDI" : "ÖN ÖLÇÜ · TEYİT BEKLİYOR";
+  return `<header class="brand"><img src="__LOGO__" alt="Şahinsoy Perde & Döşemelik"><div><h1>${safe(title)}</h1><p>No: ${safe(String(sale._id || "").slice(-8).toUpperCase())}${revision ? ` · Ölçü kaydı ${number(revision, 0)}` : ""}${pageLabel ? ` · ${safe(pageLabel)}` : ""}</p><p style="font-size:13px;font-weight:bold;line-height:1.2">${safe(label)}</p></div></header>`;
 }
 
 function customerMeta(sale, header) {
