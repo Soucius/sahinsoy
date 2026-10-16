@@ -60,12 +60,49 @@ function nonnegative(value, label) {
   return number;
 }
 
+const validIsoDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00.000Z`)) && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
+const validIsoTimestamp = (value) => typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+
+function exchangeRateSnapshot(currency, form) {
+  if (currency === "TRY") return {};
+  const mode = form.currency_rate_mode || "manual";
+  if (!["automatic", "manual"].includes(mode)) throw new Error("Kur hesaplama şeklini seçin.");
+  if (mode === "manual") return { currency_rate_mode: mode, currency_rate_source: "manual", currency_rate_type: null, currency_rate_date: null, currency_rate_fetched_at: null };
+  const date = String(form.currency_rate_date || "");
+  const fetchedAt = String(form.currency_rate_fetched_at || "");
+  if (!["USD", "EUR"].includes(currency) || form.currency_rate_source !== "TCMB" || form.currency_rate_type !== "ForexSelling"
+    || !validIsoDate(date) || !validIsoTimestamp(fetchedAt)) {
+    throw new Error("Otomatik kur bilgisi doğrulanamadı. Güncel kuru alın veya elle kur girin.");
+  }
+  // Saved rates can be historical: freshness is checked when TCMB supplies a new quote.
+  return { currency_rate_mode: mode, currency_rate_source: "TCMB", currency_rate_type: "ForexSelling", currency_rate_date: date, currency_rate_fetched_at: fetchedAt };
+}
+
+export function paymentConversion(total, header = {}) {
+  const totalTl = roundMoney(nonnegative(total, "Ödeme tutarı"));
+  const currency = header.payment_currency || "TRY";
+  if (!["TRY", "EUR", "USD"].includes(currency)) throw new Error("Ödeme para birimini seçin.");
+  if (currency === "TRY") return { currency, rate: 1, amount: totalTl, total_tl: totalTl };
+  const conversionRate = positive(header.payment_currency_rate, `${currency}/TL ödeme kuru`);
+  const mode = header.payment_rate_mode || "manual";
+  if (!["automatic", "manual"].includes(mode)) throw new Error("Ödeme kuru hesaplama şeklini seçin.");
+  const automatic = mode === "automatic";
+  if (automatic && (header.payment_rate_source !== "Harem" || header.payment_rate_type !== "Buying"
+    || !validIsoDate(header.payment_rate_date) || !validIsoTimestamp(header.payment_rate_fetched_at) || !validIsoTimestamp(header.payment_rate_quoted_at))) {
+    throw new Error("Harem alış kuru doğrulanamadı. Güncel ödeme kurunu alın veya elle kur girin.");
+  }
+  const amount = roundMoney(totalTl / conversionRate);
+  if (!Number.isSafeInteger(Math.round(amount * 100))) throw new Error("Ödeme kuru veya tutarı hesaplama sınırlarını aşıyor.");
+  return { currency, rate: conversionRate, amount, total_tl: totalTl, rate_mode: mode, rate_source: automatic ? "Harem" : "manual", rate_type: automatic ? "Buying" : null, rate_date: automatic ? header.payment_rate_date : null, fetched_at: automatic ? header.payment_rate_fetched_at : null, quoted_at: automatic ? header.payment_rate_quoted_at : null };
+}
+
 export function calculateCurtainLine(product, form) {
   if (!product?._id) throw new Error("Önce bir ürün seçin.");
   const mode = productMode(product);
   const type = product.calculation_type || "adet";
   const currency = product.currency || product.price_currency || "TRY";
   const rate = currency === "TRY" ? 1 : positive(form.currency_rate, `${currency}/TL kuru`);
+  const rateSnapshot = exchangeRateSnapshot(currency, form);
   const nativePrice = nonnegative(product.sale_price, "Ürün fiyatı");
   const basePrice = roundMoney(nativePrice * rate);
   const requiresDirection = needsControlDirection(product);
@@ -198,7 +235,7 @@ export function calculateCurtainLine(product, form) {
     quantity, unit_label: type === "mt" ? "m" : type === "m2" ? "m²" : "adet", pleat_name: mode === "textile" || mode === "fon" ? pleat.name : "", pleat_factor: pleat.factor,
     base_unit_price: basePrice, material_total: materialTotal, labor_unit_price: laborPrice, labor_total: laborTotal, accessories, accessories_total: accessoriesTotal,
     unit_price: itemTotal / quantity, item_total: itemTotal,
-    original_currency: currency, original_unit_price: nativePrice, currency_rate: rate, calculation_note: note,
+    original_currency: currency, original_unit_price: nativePrice, currency_rate: rate, ...rateSnapshot, calculation_note: note,
     pricing_snapshot: {
       min_m2: Number(product.min_m2) || 0, rounding_step: Number(product.rounding_step) || 0,
       min_width_cm: Number(product.min_width_cm) || 0, min_height_cm: Number(product.min_height_cm) || 0,
@@ -221,17 +258,20 @@ export function orderTotals(cart, discountPercent) {
   return { subtotal, discountPercent: percent, discountAmount, total: roundMoney(subtotal - discountAmount) };
 }
 
-export function salePayload(cart, header, percent, status, existingIdempotencyKey) {
-  const totals = orderTotals(cart, percent);
+export function salePayload(cart, header, percent, status, existingIdempotencyKey, savedFee = 0) {
+  const fee = roundMoney(nonnegative(savedFee, "Kayıtlı ödeme farkı"));
+  const computed = orderTotals(cart, percent);
+  const totals = { ...computed, total: roundMoney(computed.total + fee) };
+  const payment = paymentConversion(totals.total, header);
   const panelNote = (line) => line.mechanical_panels?.length ? [`${line.case_count} ${line.case_mode === "ortak" ? "ortak" : "ayrı"} kasa · ${line.pieces} parça`, ...line.mechanical_panels.map((panel) => `${panel.label}${panel.position ? ` (${panel.position})` : ""}: ${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm${panel.variant ? ` · Renk / VR: ${panel.variant}` : ""} · Zincir / ip yönü: ${panel.chain_direction}`)].join(" / ") : "";
   return {
     sale_items: cart.map((line) => ({ product: line.product_id, quantity: line.quantity, width: line.width, height: line.height, unit_price: line.unit_price, total_price: line.item_total, room_name: [line.room_name, line.area].filter(Boolean).join(" / "), facade: line.facade, window_name: line.window_name, item_note: [line.variant ? `Renk / VR: ${line.variant}` : "", line.chain_direction ? `Zincir / ip yönü: ${line.chain_direction}` : "", panelNote(line), line.pleat_name, line.item_note].filter(Boolean).join(" · ") })),
-    sub_total: totals.subtotal, discount_amount: totals.discountAmount, discount_percent: totals.discountPercent, credit_card_fee: 0, grand_total: totals.total,
+    sub_total: totals.subtotal, discount_amount: totals.discountAmount, discount_percent: totals.discountPercent, credit_card_fee: fee, grand_total: totals.total,
     payment_method: header.payment_method, status,
     ...(["preliminary", "confirmed"].includes(header.measurement_status || "preliminary") ? { measurement_status: header.measurement_status || "preliminary" } : {}),
     customer_name: `${header.first_name || ""} ${header.last_name || ""}`.trim(), customer_phone: header.customer_phone || "", customer_address: header.customer_address || "", delivery_date: header.delivery_date || null, sale_note: header.sale_note || "", delivery_method: header.delivery_method,
     client_request_id: existingIdempotencyKey,
-    pos_details: { version: 1, cart, header: { ...header }, discount_percent: totals.discountPercent, delivery_method: header.delivery_method },
+    pos_details: { version: 1, cart, header: { ...header }, discount_percent: totals.discountPercent, delivery_method: header.delivery_method, ...(payment.currency !== "TRY" ? { payment_conversion: payment } : {}) },
   };
 }
 
