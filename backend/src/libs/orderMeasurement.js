@@ -49,12 +49,33 @@ export function measurementFormForLine(line) {
   return form;
 }
 
-/** A dual plise shares its actual glass width; its two fabric heights stay independent. */
+/** New shared systems edit both dimensions; legacy pairs retain separate fabric heights. */
 export function changeMeasurementForms(cart, forms, lineIndex, key, value) {
-  const group = cart[lineIndex]?.dual_plise?.group_id;
-  return forms.map((form, index) => index === lineIndex || (key === "width" && group && cart[index]?.dual_plise?.group_id === group)
+  const metadata = cart[lineIndex]?.dual_plise;
+  const group = metadata?.group_id;
+  const sharedDimension = key === "width" || (key === "height" && metadata?.shared_measurements === true);
+  return forms.map((form, index) => index === lineIndex || (sharedDimension && group && cart[index]?.dual_plise?.group_id === group)
     ? { ...form, [key]: value }
     : form);
+}
+
+/** Collapse only validated-shaped shared pairs into one measurement card, preserving DTO indices. */
+export function measurementLineGroups(cart) {
+  const paired = new Map();
+  cart.forEach((line, index) => {
+    if (line.dual_plise?.shared_measurements !== true || !line.dual_plise.group_id) return;
+    const group = line.dual_plise.group_id;
+    if (!paired.has(group)) paired.set(group, []);
+    paired.get(group).push(index);
+  });
+  return cart.flatMap((line, index) => {
+    const indices = line.dual_plise?.shared_measurements === true ? paired.get(line.dual_plise.group_id) : null;
+    if (indices?.length === 2 && ["tul", "guneslik"].every((role) => indices.some((position) => cart[position].dual_plise.role === role))) {
+      if (index !== indices[0]) return [];
+      return [{ line, index, partner: cart[indices[1]], partner_index: indices[1] }];
+    }
+    return [{ line, index }];
+  });
 }
 
 export function measurementSummary(line) {
