@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { calculateMeasurementBatch, createMeasurementRow, supportsMeasurementBatch } from "./pliseBatch.js";
+import { calculateMeasurementBatch, createMeasurementRow, getCaseColorOptions, selectCaseColorIndices, supportsMeasurementBatch } from "./pliseBatch.js";
 import { calculateCurtainLine, defaultMeasurement, restoreSaleDraft, salePayload } from "./curtainCalculation.js";
 import { normalizeSale } from "../../../backend/src/libs/sale-validation.js";
 import { buildMeasurementRevision, measurementFormForLine } from "../../../backend/src/libs/orderMeasurement.js";
@@ -10,6 +10,19 @@ const product = {
   _id: "507f1f77bcf86cd799439011", product_name: "OBA Plise", category_name: "Plise", brand_name: "OBA Perdesan",
   calculation_type: "m2", sale_price: 100, min_m2: 1, dimension_rounding_cm: 10, stock_tracking: false,
   extra_options: [{ option_name: "Profil", price_impact: 10, pricing_basis: "mt" }],
+};
+const whiteCase = "Kasa / Donanım Rengi: Beyaz";
+const anthraciteCase = "Kasa / Donanım Rengi: Antrasit";
+const walnutCase = "KASA / DONANIM RENGİ : Ceviz";
+const caseProduct = {
+  ...product,
+  extra_options: [
+    ...product.extra_options,
+    { option_name: whiteCase, price_impact: 0, pricing_basis: "adet", pricing_scope: "kasa" },
+    { option_name: anthraciteCase, price_impact: 20, pricing_basis: "mt" },
+    { option_name: "Kasa bağlantı aparatı", price_impact: 5, pricing_basis: "adet", pricing_scope: "kasa" },
+    { option_name: walnutCase, price_impact: 10, pricing_basis: "yuzde" },
+  ],
 };
 const header = { first_name: "Deneme", last_name: "Müşteri", delivery_date: "2026-10-20", delivery_method: "magaza", payment_method: "Nakit" };
 const common = (p = product, overrides = {}) => ({
@@ -37,6 +50,151 @@ test("batch eligibility includes Plise and Honeycomb m² products without enabli
   assert.equal(supportsMeasurementBatch({ ...product, calculation_type: "adet" }), false);
   assert.equal(supportsMeasurementBatch({ ...product, calculation_type: "mt" }), false);
   assert.equal(supportsMeasurementBatch(null), false);
+});
+
+test("case-color choices preserve catalog names and replace colors without dropping other accessories", () => {
+  assert.deepEqual(getCaseColorOptions(caseProduct), [
+    { index: 1, option_name: whiteCase, label: "Beyaz" },
+    { index: 2, option_name: anthraciteCase, label: "Antrasit" },
+    { index: 4, option_name: walnutCase, label: "Ceviz" },
+  ]);
+  assert.deepEqual(getCaseColorOptions({ extra_options: [{ option_name: "Kasa / Donanım Rengi:" }, { option_name: "Kasa rengi açıklaması" }] }), []);
+  assert.deepEqual(getCaseColorOptions(null), []);
+  const padded = { extra_options: [{ option_name: `  ${whiteCase}  ` }] };
+  assert.deepEqual(selectCaseColorIndices(padded, [], getCaseColorOptions(padded)[0].option_name), [0]);
+  const selected = Object.freeze([0, 1, 2, 3]);
+  assert.deepEqual(selectCaseColorIndices(caseProduct, selected, walnutCase), [0, 3, 4]);
+  assert.deepEqual(selectCaseColorIndices(caseProduct, selected, ""), [0, 3]);
+  assert.deepEqual(selected, [0, 1, 2, 3]);
+  for (const invalid of ["Antrasit", "2", "Kasa / Donanım Rengi: Katalogda yok"]) {
+    assert.throws(() => selectCaseColorIndices(caseProduct, selected, invalid), /Kasa rengini/);
+  }
+  for (const invalid of [null, "0,1", {}]) assert.throws(() => selectCaseColorIndices(caseProduct, invalid, whiteCase), /Aksesuar seçimlerini/);
+});
+
+test("new and copied measurement rows retain independent case-color choices", () => {
+  assert.equal(createMeasurementRow().case_color, "");
+  const original = row(100, 200, 2, { label: "Kapı yanı", variant: "VR200", case_color: anthraciteCase });
+  const copy = createMeasurementRow(original);
+  assert.deepEqual(copy, original);
+  assert.notEqual(copy, original);
+  copy.case_color = whiteCase;
+  copy.width = "120";
+  assert.equal(original.case_color, anthraciteCase);
+  assert.equal(original.width, "100");
+  assert.equal(copy.count, "2");
+  assert.equal(copy.variant, "VR200");
+});
+
+test("each row applies only its own case color while preserving common accessories, totals and previews", () => {
+  for (const category_name of ["Plise", "Honeycomb"]) {
+    const p = { ...caseProduct, category_name };
+    const form = common(p, { extra_indices: [0, 1, 3] });
+    const rows = [
+      row(100, 200, 1, { label: "Beyaz cam", case_color: whiteCase }),
+      row(120, 210, 2, { label: "Antrasit cam", case_color: anthraciteCase }),
+      row(80, 90, 1, { label: "Renksiz cam", case_color: "" }),
+    ];
+    const before = JSON.stringify({ form, rows, p });
+    const result = calculateMeasurementBatch(p, form, rows);
+    assert.deepEqual(result.lines.map((line) => line.accessories.map((option) => option.name)), [
+      ["Profil", "Kasa bağlantı aparatı", whiteCase],
+      ["Profil", "Kasa bağlantı aparatı", anthraciteCase],
+      ["Profil", "Kasa bağlantı aparatı"],
+    ]);
+    assert.deepEqual(result.lines.map((line) => line.item_total), [215, 586, 113]);
+    assert.equal(result.total, 914);
+    assert.equal(result.quantity, 8.04);
+    assert.equal(result.pieces, 4);
+    for (let index = 0; index < rows.length; index++) {
+      const line = result.lines[index];
+      assert.deepEqual(line.pricing_snapshot.extra_options.map((option) => option.option_name), line.accessories.map((option) => option.name));
+      assert.deepEqual(calculateMeasurementBatch(p, form, [rows[index]]).lines[0], line);
+    }
+    assert.notEqual(result.lines[0].accessories, result.lines[1].accessories);
+    assert.notEqual(result.lines[0].pricing_snapshot.extra_options, result.lines[1].pricing_snapshot.extra_options);
+    assert.equal(JSON.stringify({ form, rows, p }), before);
+  }
+});
+
+test("legacy rows retain common case colors while an explicit blank removes them only from that row", () => {
+  const legacy = { width: "100", height: "200", count: "1", label: "Eski satır", variant: "" };
+  const result = calculateMeasurementBatch(caseProduct, common(caseProduct, { extra_indices: [0, 2] }), [legacy, row(100, 200)]);
+  assert.deepEqual(result.lines.map((line) => line.accessories.map((option) => option.name)), [["Profil", anthraciteCase], ["Profil"]]);
+  assert.deepEqual(result.lines.map((line) => line.item_total), [230, 210]);
+  assert.equal(Object.hasOwn(legacy, "case_color"), false);
+  assert.throws(() => calculateMeasurementBatch(caseProduct, common(caseProduct), [legacy, row(100, 200, 1, { case_color: "Geçersiz renk" })]), /2\. ölçü satırı:.*Kasa rengini/);
+});
+
+test("free, paid and percentage case colors survive saving and measurement revision with original prices and FX", () => {
+  const usd = {
+    ...caseProduct, currency: "USD", sale_price: 12.5,
+    extra_options: caseProduct.extra_options.map((option, index) => index === 0 ? { ...option, price_impact: 1.25, currency: "USD" } : index === 2 ? { ...option, price_impact: 2.5, currency: "USD" } : option),
+  };
+  const fx = { currency_rate: "40", currency_rate_mode: "automatic", currency_rate_source: "TCMB", currency_rate_type: "ForexSelling", currency_rate_date: "2026-10-15", currency_rate_fetched_at: "2026-10-15T13:00:00.000Z" };
+  const result = calculateMeasurementBatch(usd, common(usd, { ...fx, extra_indices: [0, 1] }), [
+    row(100, 200, 1, { case_color: whiteCase }),
+    row(155, 205, 2, { case_color: anthraciteCase }),
+    row(100, 200, 1, { case_color: walnutCase }),
+  ]);
+  assert.deepEqual(result.lines.map((line) => line.item_total), [1050, 3825, 1150]);
+  assert.equal(result.total, 6025);
+  assert.deepEqual(result.lines.map((line) => line.accessories[1]), [
+    { name: whiteCase, pricing_basis: "adet", pricing_scope: "kasa", unit: "adet", quantity: 1, unit_price: 0, total: 0 },
+    { name: anthraciteCase, pricing_basis: "mt", pricing_scope: "parca", unit: "m", quantity: 3.1, unit_price: 100, total: 310 },
+    { name: walnutCase, pricing_basis: "yuzde", pricing_scope: "parca", unit: "%", quantity: 10, unit_price: 10, total: 100 },
+  ]);
+  const saved = JSON.parse(JSON.stringify(savedOrder(result.lines)));
+  const restored = restoreSaleDraft(saved);
+  assert.deepEqual(restored.cart, saved.pos_details.cart);
+  const measurements = restored.cart.map((line, index) => ({ ...measurementFormForLine(line), ...(index === 1 ? { width: 165 } : index === 2 ? { height: 210 } : {}) }));
+  const revised = buildMeasurementRevision(saved, { measurements }, [{ ...usd, sale_price: 999, min_m2: 50, dimension_rounding_cm: 100, extra_options: [] }]);
+  assert.deepEqual(revised.pos_details.cart.map((line) => line.item_total), [1050, 4065, 1205]);
+  assert.equal(revised.sub_total, 6320);
+  assert.deepEqual(revised.pos_details.cart[0], restored.cart[0]);
+  for (let index = 0; index < result.lines.length; index++) {
+    const line = revised.pos_details.cart[index];
+    assert.deepEqual(line.pricing_snapshot, result.lines[index].pricing_snapshot);
+    assert.deepEqual(line.accessories.map((option) => option.name), result.lines[index].accessories.map((option) => option.name));
+    assert.equal(line.base_unit_price, 500);
+    assert.equal(line.original_unit_price, 12.5);
+    assert.equal(line.currency_rate, 40);
+    assert.equal(line.accessories[0].unit_price, 50);
+    assert.equal(line.currency_rate_source, "TCMB");
+    assert.equal(line.currency_rate_fetched_at, fx.currency_rate_fetched_at);
+  }
+  assert.deepEqual(revised.pos_details.cart[1].accessories[1], { ...result.lines[1].accessories[1], quantity: 3.3, total: 330 });
+  assert.deepEqual(revised.pos_details.cart[2].accessories[1], { ...result.lines[2].accessories[1], unit_price: 10.5, total: 105 });
+  assert.doesNotThrow(() => normalizeSale({ ...saved, ...revised }));
+});
+
+test("customer and manufacturing output keep each case color beside its own row without color leakage", () => {
+  const rows = [
+    row(100, 200, 1, { label: "Beyaz cam", variant: "VR101", case_color: whiteCase }),
+    row(120, 210, 2, { label: "Antrasit cam", variant: "VR202", case_color: anthraciteCase }),
+    row(80, 90, 1, { label: "Renksiz cam", variant: "VR303", case_color: "" }),
+  ];
+  const saved = savedOrder(calculateMeasurementBatch(caseProduct, common(caseProduct, { extra_indices: [0, 1] }), rows).lines);
+  const customer = createCustomerOrderHtml(saved);
+  const manufacturing = createManufacturingHtml(saved);
+  const customerRows = customer.match(/<tr><td>[\s\S]*?<\/tr>/g) || [];
+  const manufacturingRows = manufacturing.match(/<section class="plan-box">[\s\S]*?<\/section>/g) || [];
+  assert.equal(customerRows.length, 3);
+  assert.equal(manufacturingRows.length, 3);
+  for (const rendered of [customerRows, manufacturingRows]) {
+    for (let index = 0; index < rows.length; index++) {
+      assert.ok(rendered[index].includes(rows[index].label));
+      assert.ok(rendered[index].includes(rows[index].variant));
+      assert.ok(rendered[index].includes("Profil"));
+      for (const color of [whiteCase, anthraciteCase, walnutCase]) assert.equal(rendered[index].includes(color), rows[index].case_color === color);
+    }
+  }
+  assert.ok(customerRows[0].includes("Ölçü: 100,00 × 200,00 cm"));
+  assert.ok(customerRows[1].includes("Ölçü: 120,00 × 210,00 cm"));
+  assert.ok(customerRows[2].includes("Ölçü: 80,00 × 90,00 cm"));
+  assert.ok(manufacturingRows[1].includes("2 adet · En 120,00 cm"));
+  assert.ok(manufacturingRows[1].includes("Boy 210,00 cm"));
+  assert.ok(!manufacturing.includes("₺"));
 });
 
 test("30 mixed rows apply per-piece minimums and rounding, then add actual-width profiles", () => {
