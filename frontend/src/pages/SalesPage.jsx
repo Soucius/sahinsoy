@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import api from '../libs/axios';
 import toast from 'react-hot-toast';
-import {openCurtainPrint} from '../libs/curtainPrint';
+import {hasManufacturingItems,openCurtainPrint} from '../libs/curtainPrint';
 const money=x=>Number(x||0).toLocaleString('tr-TR',{style:'currency',currency:'TRY'});
 const statuses={beklemede:'Beklemede',tamamlandi:'Sipariş onaylandı',teslim_edildi:'Teslim Edilen İşler',kaybedildi:'Kaybedilen teklifler',iptal:'İptal Edilenler'};
 const isApprovedWork=sale=>sale.status==='tamamlandi'||sale.status==='teslim_edildi';
@@ -90,7 +90,7 @@ export default function SalesPage(){
       <div className="flex flex-wrap gap-3 mt-4">
         {(sale.status==='beklemede'||sale.status==='tamamlandi')&&<button disabled={busy!==null} onClick={()=>navigate(`/dashboard/sales/${sale._id}/measurements`)} className="bg-[#80512f] text-[#fffaf3] px-5 rounded-lg font-semibold">Ölçü / Teyit</button>}
         {(sale.status==='beklemede'||sale.status==='kaybedildi')&&<><button disabled={busy!==null} onClick={()=>navigate('/dashboard/pos',{state:{pendingSale:sale}})} className="bg-indigo-600 text-white px-5 rounded-lg">Teklifi aç / Düzenle</button>{sale.status==='beklemede'&&<button disabled={busy!==null} onClick={()=>lose(sale)} className="border px-4 rounded-lg">Kaybedildi olarak işaretle</button>}</>}
-        {isApprovedWork(sale)&&<><button disabled={busy!==null} onClick={()=>printOrder(sale,'customer')} className="border px-4 rounded-lg">Müşteri sipariş kağıdı / PDF</button><button disabled={busy!==null} onClick={()=>printOrder(sale,'manufacturing')} className="border px-4 rounded-lg">İmalat planı / PDF</button></>}
+        {isApprovedWork(sale)&&<><button disabled={busy!==null} onClick={()=>printOrder(sale,'customer')} className="border px-4 rounded-lg">Müşteri sipariş kağıdı / PDF</button>{hasManufacturingItems(sale.pos_details?.cart)&&<button disabled={busy!==null} onClick={()=>printOrder(sale,'manufacturing')} className="border px-4 rounded-lg">İmalat planı / PDF</button>}</>}
         {sale.status==='tamamlandi'&&<><button disabled={busy!==null} onClick={()=>setDeliverTarget(sale)} className="bg-indigo-600 text-white px-5 rounded-lg">Teslim edildi</button><button disabled={busy!==null} onClick={()=>setCancelTarget(sale)} className="border border-red-200 text-red-700 px-4 rounded-lg">Siparişi iptal et</button></>}
       </div>
     </article>)}</div>}
