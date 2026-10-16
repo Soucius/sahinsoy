@@ -180,7 +180,7 @@ const ProductsPage = () => {
         <body>
           <div class="ticket">
             <h3>${product.product_name}</h3>
-            <p>₺${product.sale_price}</p>
+            <p>${new Intl.NumberFormat('tr-TR', { style: 'currency', currency: product.currency || 'TRY' }).format(product.sale_price)}</p>
             <img src="https://bwipjs-api.metafloor.com/?bcid=code128&text=${product.product_barcode}&scale=3&includetext" alt="Barkod" />
           </div>
           <script>setTimeout(() => { window.print(); window.close(); }, 500);</script>
