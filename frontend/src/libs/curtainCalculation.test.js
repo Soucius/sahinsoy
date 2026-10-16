@@ -77,6 +77,44 @@ test("dövizli motor, kur girilmeden TL gibi satılamaz", () => {
   assert.throws(() => measured(motor, { currency_rate: "" }), /kuru/);
   assert.equal(measured(motor, { currency_rate: "40", count: "2" }).item_total, 8000);
 });
+const automaticRate = { currency_rate_mode: "automatic", currency_rate_source: "TCMB", currency_rate_type: "ForexSelling", currency_rate_date: "2026-10-15", currency_rate_fetched_at: "2026-10-16T09:00:00.000Z" };
+
+test("USD/EUR otomatik kur, kaynak ve tarihle kaydedilip aynı tutarla geri yüklenir", () => {
+  for (const currency of ["USD", "EUR"]) {
+    const motor = { ...textile, calculation_type: "adet", sale_price: 100, currency, product_category: { category_name: "Motor" } };
+    const line = measured(motor, { ...automaticRate, currency_rate: "42.1234", count: "2" });
+    assert.equal(line.item_total, 8424.68);
+    assert.equal(line.original_unit_price, 100);
+    const restored = restoreSaleDraft(saved([line]));
+    for (const [key, value] of Object.entries(automaticRate)) assert.equal(restored.cart[0][key], value);
+    assert.equal(restored.cart[0].currency_rate, 42.1234);
+    assert.equal(restored.cart[0].item_total, 8424.68);
+  }
+});
+
+test("otomatik kur eksik/yanlış kaynak veya tarihle resmi kur gibi kaydedilemez", () => {
+  const motor = { ...textile, calculation_type: "adet", currency: "USD" };
+  for (const overrides of [{ currency_rate_source: "other" }, { currency_rate_type: "BanknoteSelling" }, { currency_rate_date: "2026-02-30" }, { currency_rate_fetched_at: "" }, { currency_rate_mode: "unknown" }]) {
+    assert.throws(() => measured(motor, { ...automaticRate, currency_rate: "42", ...overrides }), /[Kk]ur/);
+  }
+  assert.throws(() => measured(motor, { ...automaticRate, currency_rate: "0" }), /kuru/);
+});
+
+test("elle değişen ve eski elle girilmiş kur TCMB etiketi taşımaz; TL etkilenmez", () => {
+  const motor = { ...textile, calculation_type: "adet", currency: "EUR", sale_price: 100 };
+  const manual = measured(motor, { ...automaticRate, currency_rate: "43,5", currency_rate_mode: "manual" });
+  assert.equal(manual.item_total, 4350);
+  assert.equal(manual.currency_rate_source, "manual");
+  assert.equal(manual.currency_rate_date, null);
+  assert.equal(manual.currency_rate_type, null);
+  assert.equal(manual.currency_rate_fetched_at, null);
+  assert.equal(measured(motor, { currency_rate: "43" }).currency_rate_mode, "manual");
+  const local = measured(textile, { ...automaticRate, currency_rate: "99" });
+  assert.equal(local.currency_rate, 1);
+  assert.equal(local.material_total, 6200);
+  assert.equal(Object.hasOwn(local, "currency_rate_source"), false);
+});
+
 test("iskonto ürün ve işçilik toplamından hesaplanır, kredi kartı gizli ek ücret getirmez", () => {
   const line = measured(textile, { labor_price: "90" });
   assert.deepEqual(orderTotals([line], "10"), { subtotal: 7316, discountPercent: 10, discountAmount: 731.6, total: 6584.4 });
