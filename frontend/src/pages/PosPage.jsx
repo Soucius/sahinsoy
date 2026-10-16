@@ -44,8 +44,8 @@ function Field({ label, children, full = false }) {
   return <label className={full ? "full" : ""}>{label}{children}</label>;
 }
 
-function NumberField({ label, value, onChange, min = 0, step = "any", required = false }) {
-  return <Field label={label}><input type="number" inputMode="decimal" min={min} step={step} value={value} onChange={(event) => onChange(event.target.value)} required={required} /></Field>;
+function NumberField({ label, value, onChange, min = 0, step = "any", required = false, readOnly = false }) {
+  return <Field label={label}><input type="number" inputMode="decimal" min={min} step={step} value={value} onChange={(event) => onChange(event.target.value)} required={required} readOnly={readOnly} /></Field>;
 }
 
 function MechanicalDetails({ line }) {
@@ -460,8 +460,8 @@ export default function PosPage() {
       </> : <>
         <div className="fields"><Field label={panelBuilderActive ? "Ortak renk / VR numarası (isteğe bağlı)" : "Renk / VR numarası"} full><input list="pos-variant-list" value={measurement.variant} maxLength={150} onChange={(event) => updateMeasurement("variant", event.target.value)} placeholder="Renk / VR seçin veya yazın" /><datalist id="pos-variant-list">{(selected.variants || []).map((variant, index) => { const label = typeof variant === "string" ? variant : [variant.vr || variant.vr_number || variant.variant_code || variant.code, variant.color || variant.color_name].filter(Boolean).join(" · "); return <option key={index} value={label} />; })}</datalist></Field>
           {mode === "fon" && <Field label="Satış şekli"><select value={measurement.order_mode} onChange={(event) => updateMeasurement("order_mode", event.target.value)}><option value="takim">Takım · 2 kanat</option><option value="adet">Adet · tek kanat</option></select></Field>}
-          <NumberField label={panelBuilderActive ? "Bu ölçü grubundan kaç adet?" : mode === "textile" ? "Parça sayısı" : mode === "fon" && measurement.order_mode === "takim" ? "Takım adedi" : "Adet sayısı"} value={measurement.count} onChange={(value) => updateMeasurement("count", value)} min={1} step={1} />
-          {!panelBuilderActive && <><NumberField label={mode === "fon" ? (measurement.order_mode === "takim" ? "Sol kanat eni (cm)" : "Kanat eni (cm)") : mode === "textile" ? "Toplam cephe / bitmiş en (cm)" : "En (cm)"} value={measurement.width} onChange={(value) => updateMeasurement("width", value)} min={selected.calculation_type === "adet" ? 0 : 1} />
+          <NumberField label={panelBuilderActive ? "Bu ölçü grubundan kaç adet?" : mode === "textile" ? "Parça sayısı" : (mode === "fon" && measurement.order_mode === "takim") || selected.supplier_unit === "Takım" ? "Takım adedi" : "Adet sayısı"} value={measurement.count} onChange={(value) => updateMeasurement("count", value)} min={1} step={1} />
+          {!panelBuilderActive && <><NumberField label={mode === "fon" ? (measurement.order_mode === "takim" ? "Sol kanat eni (cm)" : "Kanat eni (cm)") : mode === "textile" ? "Toplam cephe / bitmiş en (cm)" : "En (cm)"} value={measurement.width} onChange={(value) => updateMeasurement("width", value)} min={selected.calculation_type === "adet" ? 0 : 1} readOnly={Boolean(selected.fixed_dimensions?.width_cm)} />
           <NumberField label={mode === "fon" && measurement.order_mode === "takim" ? "Sol kanat boyu (cm)" : "Boy (cm)"} value={measurement.height} onChange={(value) => updateMeasurement("height", value)} min={selected.calculation_type === "m2" || mode === "fon" || mode === "textile" ? 1 : 0} /></>}
           {(mode === "textile" || mode === "fon") && <><Field label="Pile türü"><select value={measurement.pleat_id} onChange={(event) => updateMeasurement("pleat_id", event.target.value)}>{PLEATS.map((pleat) => <option key={pleat.id} value={pleat.id}>{pleat.name} · 1'e {pleat.factor}</option>)}</select></Field><NumberField label="Giden kumaşın metre işçiliği (₺ / m)" value={measurement.labor_price} onChange={(value) => updateMeasurement("labor_price", value)} /></>}
           {currency !== "TRY" && <div className="full review-card">
@@ -475,6 +475,8 @@ export default function PosPage() {
             {(fxError || !fxQuote) && <button type="button" disabled={fxLoading || locked || processing} onClick={refreshRates}>{fxLoading ? <Loader2 className="spin" size={16} /> : null}Kuru yeniden dene</button>}
           </div>}
         </div>
+        {selected.fixed_dimensions?.width_cm > 0 && <p className="muted">Bu ürünün eni sabittir. Farklı en için uygun ölçüdeki ürünü seçin.</p>}
+        {selected.technical_limits && <p className="muted">Sistem sınırları: {[["min_width_cm", "En en az", "cm"], ["max_width_cm", "En en çok", "cm"], ["min_height_cm", "Boy en az", "cm"], ["max_height_cm", "Boy en çok", "cm"], ["max_m2", "Alan en çok", "m²"], ["max_load_kg", "Yük en çok", "kg"], ["tube_diameter_mm", "Boru çapı", "mm"], ["slat_width_mm", "Lamel eni", "mm"]].filter(([key]) => selected.technical_limits[key] > 0).map(([key, label, unit]) => `${label} ${formatNumber(selected.technical_limits[key])} ${unit}`).join(" · ")}. Ölçü girildiğinde ölçü sınırları kontrol edilir; ağırlık ve donanım uyumunu ayrıca kontrol edin.</p>}
         {panelBuilderActive && <fieldset className="divider" disabled={locked || processing}>
           <h3>Kasa ve parçalar</h3><div role="group" aria-label="Kasa seçimi" className="row" style={{ marginTop: 12 }}><button type="button" className="chip" aria-pressed={measurement.case_mode === "ayri"} onClick={() => updateMeasurement("case_mode", "ayri")}>Her parça ayrı kasada</button><button type="button" className="chip" aria-pressed={measurement.case_mode === "ortak"} onClick={() => updateMeasurement("case_mode", "ortak")}>Tüm parçalar tek kasada</button></div>
           {measurement.case_mode === "ortak" && <div className="fields divider"><NumberField label="Kasa / profil eni (cm, isteğe bağlı)" value={measurement.profile_width_cm || ""} min={0} onChange={(value) => updateMeasurement("profile_width_cm", value)} /><p className="muted full">Yalnız imalat bilgisi; kasa fiyatı parçaların gerçek enleri toplamından hesaplanır.</p></div>}
