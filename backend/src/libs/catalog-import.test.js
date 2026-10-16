@@ -54,6 +54,53 @@ test("foreign motor and percentage surcharge keep currency and percentage rather
   assert.throws(() => normalizeCatalog([record({ currency: "USD", extra_options: [{ option_name: "Fark", price_impact: 10, currency: "USD", pricing_basis: "yuzde" }] })]));
 });
 
+test("supplier units, width-only sets and technical limits stay separate from billing rules", () => {
+  const limits = { min_width_cm: 50, min_height_cm: 50, max_width_cm: 245, max_height_cm: 300, max_m2: 7, max_load_kg: 40, tube_diameter_mm: 47, slat_width_mm: 25 };
+  const [set] = normalizeCatalog([record({ unit: "Adet", supplier_unit: " Takım ", fixed_dimensions: { width_cm: 200 }, technical_limits: limits, min_width_cm: 0, min_height_cm: 0, min_m2: 0, dimension_rounding_cm: 0 })]);
+  assert.equal(set.supplier_unit, "Takım");
+  assert.deepEqual(set.fixed_dimensions, { width_cm: 200, height_cm: 0 });
+  assert.deepEqual(set.technical_limits, limits);
+  assert.equal(set.min_width_cm, 0, "technical operating minima must not become billable minima");
+  assert.equal(set.min_height_cm, 0);
+  assert.equal(set.width_cm, 0, "fixed set width must not become textile fabric width");
+  const [equalLimits] = normalizeCatalog([record({ technical_limits: { min_width_cm: 50, max_width_cm: 50, min_height_cm: 100, max_height_cm: 100 } })]);
+  assert.equal(equalLimits.technical_limits.max_width_cm, 50);
+  const [heightOnly] = normalizeCatalog([record({ fixed_dimensions: { height_cm: 150 } })]);
+  assert.deepEqual(heightOnly.fixed_dimensions, { width_cm: 0, height_cm: 150 });
+  const [legacy] = normalizeCatalog([record()]);
+  for (const field of ["supplier_unit", "fixed_dimensions", "technical_limits"]) assert.equal(Object.hasOwn(legacy, field), false);
+});
+
+test("malformed supplier metadata rejects unknown keys, invalid numbers and inverted technical limits", () => {
+  for (const supplier_unit of [null, 1, true, {}, [], "", " ", "x".repeat(200)]) assert.throws(() => normalizeCatalog([record({ supplier_unit })]));
+  for (const fixed_dimensions of [null, 1, [], {}, { width_cm: 0, height_cm: 0 }, { width_cm: 100, extra: 1 }]) assert.throws(() => normalizeCatalog([record({ fixed_dimensions })]));
+  for (const field of ["width_cm", "height_cm"]) for (const value of [-1, NaN, Infinity, null, "100", true]) assert.throws(() => normalizeCatalog([record({ fixed_dimensions: { width_cm: 100, [field]: value } })]));
+  for (const technical_limits of [null, 1, [], {}, { max_width_cm: 200, arbitrary: 1 }, { min_width_cm: 201, max_width_cm: 200 }, { min_height_cm: 301, max_height_cm: 300 }]) assert.throws(() => normalizeCatalog([record({ technical_limits })]));
+  for (const field of ["min_width_cm", "min_height_cm", "max_width_cm", "max_height_cm", "max_m2", "max_load_kg", "tube_diameter_mm", "slat_width_mm"]) {
+    for (const value of [0, -1, NaN, Infinity, null, "100", true, undefined]) assert.throws(() => normalizeCatalog([record({ technical_limits: { [field]: value } })]));
+  }
+});
+
+test("Product model preserves typed supplier metadata without generated nested IDs and rejects invalid limits", () => {
+  const product = (metadata = {}) => new Product({ product_name: "Set", product_category: "507f1f77bcf86cd799439011", product_brand: "507f1f77bcf86cd799439012", product_unit: "507f1f77bcf86cd799439013", purchase_price: 100, sale_price: 280, ...metadata });
+  assert.equal(product().validateSync(), undefined, "legacy products must not require supplier metadata");
+  const valid = product({ supplier_unit: " Takım ", fixed_dimensions: { width_cm: 200 }, technical_limits: { min_width_cm: 50, max_width_cm: 245, tube_diameter_mm: 47 } });
+  assert.equal(valid.validateSync(), undefined);
+  const stored = valid.toObject();
+  assert.equal(stored.supplier_unit, "Takım");
+  assert.deepEqual(stored.fixed_dimensions, { width_cm: 200, height_cm: 0 });
+  assert.deepEqual(stored.technical_limits, { min_width_cm: 50, max_width_cm: 245, tube_diameter_mm: 47 });
+  for (const metadata of [
+    { supplier_unit: " " }, { supplier_unit: null },
+    { fixed_dimensions: null }, { fixed_dimensions: {} }, { fixed_dimensions: { width_cm: -1 } },
+    { fixed_dimensions: { width_cm: Infinity } }, { fixed_dimensions: { width_cm: 100, arbitrary: 1 } },
+    { technical_limits: null }, { technical_limits: {} }, { technical_limits: { max_m2: 0 } },
+    { technical_limits: { max_load_kg: Infinity } }, { technical_limits: { max_width_cm: 200, arbitrary: 1 } },
+    { technical_limits: { min_width_cm: 201, max_width_cm: 200 } },
+    { technical_limits: { min_height_cm: 301, max_height_cm: 300 } }
+  ]) assert.ok(product(metadata).validateSync(), JSON.stringify(metadata));
+});
+
 test("late invalid record causes zero sessions or writes, so no partial import is possible", async (t) => {
   const calls = mockDatabase(t);
   const res = response();
@@ -62,6 +109,40 @@ test("late invalid record causes zero sessions or writes, so no partial import i
   assert.equal(calls.start, 0);
   assert.equal(calls.related.length, 0);
   assert.equal(calls.operations.length, 0);
+});
+
+test("late invalid supplier metadata rejects the entire catalog before starting writes", async (t) => {
+  const calls = mockDatabase(t);
+  const res = response();
+  await importCatalog({ user: {}, body: { products: [record(), record({ catalog_id: "URUN-20002", technical_limits: { min_width_cm: 300, max_width_cm: 200 } })] } }, res);
+  assert.equal(res.statusCode, 400);
+  assert.equal(calls.start, 0);
+  assert.equal(calls.related.length, 0);
+  assert.equal(calls.operations.length, 0);
+});
+
+test("supplier metadata is inserted transactionally without changing existing product metadata or billing", async (t) => {
+  const calls = mockDatabase(t, { upsertedCount: 0 });
+  const res = response();
+  const input = record({ unit: "Adet", currency: "USD", supplier_unit: "Takım", fixed_dimensions: { width_cm: 100, height_cm: 200 }, technical_limits: { min_width_cm: 65, max_width_cm: 250, max_load_kg: 40 }, min_width_cm: 0, min_height_cm: 0, min_m2: 0, dimension_rounding_cm: 0 });
+  await importCatalog({ user: {}, body: { products: [input] } }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.existing, 1);
+  const operation = calls.operations[0].updateOne;
+  assert.deepEqual(Object.keys(operation.update), ["$setOnInsert"]);
+  const stored = operation.update.$setOnInsert;
+  assert.equal(stored.supplier_unit, "Takım");
+  assert.deepEqual(stored.fixed_dimensions, input.fixed_dimensions);
+  assert.deepEqual(stored.technical_limits, input.technical_limits);
+  assert.equal(stored.currency, "USD");
+  assert.equal(stored.calculation_type, "adet");
+  assert.equal(stored.min_width_cm, 0);
+  assert.equal(stored.min_height_cm, 0);
+  assert.equal(stored.fabric_width_cm, 0);
+  assert.equal(stored.stock_tracking, false);
+  assert.deepEqual(stored.variants, []);
+  assert.equal(calls.transaction, 1);
+  assert.equal(calls.end, 1);
 });
 
 test("import stores all mechanical metadata in one transaction and never updates existing catalog products", async (t) => {
