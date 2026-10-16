@@ -1,3 +1,5 @@
+import { paymentConversion } from './curtainCalculation.js';
+
 export class SaleInputError extends Error { constructor(message,status=400){super(message);this.status=status;} }
 const round=x=>Math.round((x+Number.EPSILON)*100)/100;
 const finite=(x,min=0)=>typeof x==='number'&&Number.isFinite(x)&&x>=min;
@@ -16,5 +18,15 @@ export function normalizeSale(input){
   if(!['beklemede','tamamlandi','kaybedildi'].includes(status))throw new SaleInputError('Sipariş durumu geçersiz.');
   const percent=input.discount_percent??(subtotal?round(discount/subtotal*100):0);
   if(!finite(percent)||percent>100||('discount_percent' in input&&Math.abs(round(subtotal*percent/100)-discount)>.05))throw new SaleInputError('İskonto yüzdesi ve tutarı uyuşmuyor.');
-  return {...input,sale_items:items,sub_total:subtotal,discount_amount:round(discount),discount_percent:percent,credit_card_fee:round(fee),grand_total:round(subtotal-discount+fee),status};
+  const grandTotal=round(subtotal-discount+fee);
+  let details=input.pos_details;
+  if(details&&typeof details==='object'&&!Array.isArray(details)){
+    try {
+      const payment=paymentConversion(grandTotal,details.header||{});
+      details={...details};
+      if(payment.currency!=='TRY')details.payment_conversion=payment;
+      else delete details.payment_conversion;
+    } catch(error) {throw new SaleInputError(error.message);}
+  }
+  return {...input,...(details?{pos_details:details}:{}),sale_items:items,sub_total:subtotal,discount_amount:round(discount),discount_percent:percent,credit_card_fee:round(fee),grand_total:grandTotal,status};
 }
