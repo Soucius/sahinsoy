@@ -98,6 +98,7 @@ export default function PosPage() {
   const [dualError, setDualError] = useState("");
   const [dualRefresh, setDualRefresh] = useState(0);
   const [editDualPair, setEditDualPair] = useState(null);
+  const [legacyDualHeights, setLegacyDualHeights] = useState(null);
   const [existingId, setExistingId] = useState(null);
   const [savedSale, setSavedSale] = useState(null);
   const [processing, setProcessing] = useState(false);
@@ -348,6 +349,7 @@ export default function PosPage() {
     setSelected(product);
     setEditId(null);
     setEditDualPair(null);
+    setLegacyDualHeights(null);
     setDualEnabled(false);
     setSecondaryProduct(null);
     setDualProducts([]);
@@ -372,6 +374,7 @@ export default function PosPage() {
         setSelected(restored.primary);
         setSecondaryProduct(restored.secondary);
         setEditDualPair(pair);
+        setLegacyDualHeights(restored.legacyHeights);
         setEditId(null);
         setDualEnabled(true);
         setBatchEnabled(true);
@@ -394,6 +397,7 @@ export default function PosPage() {
       setDualEnabled(false);
       setSecondaryProduct(null);
       setEditDualPair(null);
+      setLegacyDualHeights(null);
       setBatchRows([{ ...createMeasurementRow({ ...line, label: "", count: line.count || 1 }), key: nextKey() }]);
       setEditId(line.id);
       setBatchEnabled(false);
@@ -599,7 +603,7 @@ export default function PosPage() {
         <p id="pos-room-name-hint" className="muted">İstediğiniz kadar oda ekleyebilirsiniz. Örn. Yatak Odası 2, Çocuk Odası 2. Eklediğiniz oda adları sonraki ürünlerde tekrar seçilebilir.</p>
         <p className="choice-label">Hangi cephe? <span className="muted">İsteğe bağlı</span></p><div className="row">{FACADES.map((facade) => <button key={facade} className="chip" aria-pressed={measurement.facade === facade} onClick={() => updateMeasurement("facade", measurement.facade === facade ? "" : facade)}>{facade}</button>)}</div><p className="choice-label">Hangi pencere? <span className="muted">İsteğe bağlı</span></p><div className="row">{WINDOWS.map((windowName) => <button key={windowName} className="chip" aria-pressed={measurement.window_name === windowName} onClick={() => updateMeasurement("window_name", measurement.window_name === windowName ? "" : windowName)}>{windowName}</button>)}</div><p className="muted divider">Her cepheyi ayrı ürün kalemi olarak ekleyebilirsiniz. Oda ve ürün kalemi sayısında sınır yok.</p><div className="actions divider"><button onClick={closeProduct}>İptal</button><button className="primary" onClick={() => { if (!measurement.room_name.trim()) toast.error("Oda / bölüm adını girin."); else setWizardStep(2); }}>İleri<ArrowRight size={18} /></button></div>
       </> : <>
-        {dualRole && <div className="review-card"><label className="check"><input type="checkbox" checked={dualActive} disabled={Boolean(editDualPair)} onChange={toggleDual} />Çiftli sisteme çevir · tül + güneşlik</label>{dualActive && <><p className="muted">İlk ürün: {selected.product_name} · {primaryRoleLabel}. İkinci kumaşı aşağıdan seçin. Her kumaş kendi boyu, VR’si ve minimum 1 m² kuralıyla hesaplanır; tutarları toplanır.</p><Field label={`İkinci kumaş · ${secondaryRoleLabel}`}><select value={secondaryProduct?._id || ""} disabled={dualLoading || Boolean(editDualPair)} onChange={(event) => setSecondaryProduct(dualProducts.find((product) => product._id === event.target.value) || null)}><option value="">{dualLoading ? "Ürünler yükleniyor…" : "Seri seçin"}</option>{[...dualProducts, ...(secondaryProduct && !dualProducts.some((product) => product._id === secondaryProduct._id) ? [secondaryProduct] : [])].map((product) => <option key={product._id} value={product._id}>{product.product_name} · {formatMoney(product.sale_price)} / m²</option>)}</select></Field>{dualError && <p className="error">{dualError} <button type="button" onClick={() => setDualRefresh((value) => value + 1)}>Yeniden dene</button></p>}<p className="muted">Aynı cam için ortak en ve kasa rengi; iki ayrı boy ve renk / VR girilir. Ek çiftli mekanizma ücreti uygulanmaz.</p></>}</div>}
+        {dualRole && <div className="review-card"><label className="check"><input type="checkbox" checked={dualActive} disabled={Boolean(editDualPair)} onChange={toggleDual} />Çiftli sisteme çevir · tül + güneşlik</label>{dualActive && <><p className="muted">İlk ürün: {selected.product_name} · {primaryRoleLabel}. İkinci kumaşı aşağıdan seçin. En ve boy bir kez girilir, iki kumaşa da uygulanır. Her kumaş kendi fiyatı ve minimum 1 m² kuralıyla hesaplanır.</p><Field label={`İkinci kumaş · ${secondaryRoleLabel}`}><select value={secondaryProduct?._id || ""} disabled={dualLoading || Boolean(editDualPair)} onChange={(event) => setSecondaryProduct(dualProducts.find((product) => product._id === event.target.value) || null)}><option value="">{dualLoading ? "Ürünler yükleniyor…" : "Seri seçin"}</option>{[...dualProducts, ...(secondaryProduct && !dualProducts.some((product) => product._id === secondaryProduct._id) ? [secondaryProduct] : [])].map((product) => <option key={product._id} value={product._id}>{product.product_name} · {formatMoney(product.sale_price)} / m²</option>)}</select></Field>{dualError && <p className="error">{dualError} <button type="button" onClick={() => setDualRefresh((value) => value + 1)}>Yeniden dene</button></p>}<p className="muted">Aynı cam için tek en, tek boy ve kasa rengi seçilir. İki kumaşın renk / VR seçimleri ayrıdır. Ek çiftli mekanizma ücreti uygulanmaz.</p></>}</div>}
         {batchAvailable && !dualActive && <div className="row" role="group" aria-label="Ölçü giriş şekli"><button type="button" className="chip" aria-pressed={batchEnabled} onClick={() => setBatchEnabled(true)}>Çoklu ölçü listesi</button><button type="button" className="chip" aria-pressed={!batchEnabled} onClick={() => setBatchEnabled(false)}>Tek ölçü</button></div>}
         <div className="fields"><Field label={dualActive ? `${primaryRoleLabel} · ortak renk / VR (isteğe bağlı)` : panelBuilderActive || batchActive ? "Ortak renk / VR numarası (isteğe bağlı)" : "Renk / VR numarası"} full><input list="pos-variant-list" value={measurement.variant} maxLength={150} onChange={(event) => updateMeasurement("variant", event.target.value)} placeholder="Renk / VR seçin veya yazın" /><datalist id="pos-variant-list">{(selected.variants || []).map((variant, index) => { const label = typeof variant === "string" ? variant : [variant.vr || variant.vr_number || variant.variant_code || variant.code, variant.color || variant.color_name].filter(Boolean).join(" · "); return <option key={index} value={label} />; })}</datalist></Field>
           {dualActive && <Field label={`${secondaryRoleLabel} · ortak renk / VR (isteğe bağlı)`} full><input list="pos-secondary-variant-list" value={measurement.secondary_variant || ""} maxLength={150} onChange={(event) => updateMeasurement("secondary_variant", event.target.value)} placeholder="İkinci kumaşın renk / VR’si" /><datalist id="pos-secondary-variant-list">{(secondaryProduct?.variants || []).map((variant, index) => <option key={index} value={typeof variant === "string" ? variant : [variant.vr || variant.vr_number || variant.variant_code || variant.code, variant.color || variant.color_name].filter(Boolean).join(" · ")} />)}</datalist></Field>}
@@ -621,15 +625,15 @@ export default function PosPage() {
           </div>}
         </div>
         {batchActive && <fieldset className="divider" disabled={locked || processing}>
-          <h3>{dualActive ? "Çiftli cam ölçü listesi" : "Cam ölçü listesi"}</h3><p className="muted">{dualActive ? "Her cam için iki kumaşın boyunu ayrı girin. Her kumaşa ayrı minimum 1 m² uygulanır. Adet, çiftli sistem sayısıdır." : "Her camın enini ve boyunu ayrı girin. Aynı ölçüden birden fazlaysa Adet alanını kullanın. Her satırın minimum m² ve yuvarlama hesabı ayrı yapılır."}</p>
+          {legacyDualHeights && <p className="notice">Bu eski kayıtta iki farklı boy vardı: {formatNumber(legacyDualHeights.tul)} ve {formatNumber(legacyDualHeights.guneslik)} cm. Yeni ortak boyu Boy alanına girin; iki ürün birlikte yeniden hesaplanacak.</p>}
+          <h3>{dualActive ? "Çiftli cam ölçü listesi" : "Cam ölçü listesi"}</h3><p className="muted">{dualActive ? "Her camın enini ve boyunu bir kez girin. Aynı ölçü iki kumaşa uygulanır; her ürünün minimumu 1 m²’dir. Adet, çiftli sistem sayısıdır." : "Her camın enini ve boyunu ayrı girin. Aynı ölçüden birden fazlaysa Adet alanını kullanın. Her satırın minimum m² ve yuvarlama hesabı ayrı yapılır."}</p>
           {!editDualPair && <div className="row"><NumberField label="Toplam ölçü satırı" value={batchTarget} min={1} step={1} onChange={setBatchTarget} /><button type="button" onClick={prepareBatchRows}>Satırları hazırla</button></div>}
           <div className="measure-list" role="region" aria-label="Cam ölçüleri" tabIndex={0}>
-            <table><thead><tr><th>Cam / bölüm</th><th>En (cm)</th><th>{dualActive ? `${primaryRoleLabel} boyu` : "Boy"} (cm)</th>{dualActive && <th>{secondaryRoleLabel} boyu (cm)</th>}<th>Adet</th><th>{dualActive ? `${primaryRoleLabel} VR` : "Renk / VR"}</th>{dualActive && <th>{secondaryRoleLabel} VR</th>}<th>Kasa rengi</th><th>Hesap</th><th>İşlem</th></tr></thead><tbody>
+            <table><thead><tr><th>Cam / bölüm</th><th>En (cm)</th><th>Boy (cm)</th><th>Adet</th><th>{dualActive ? `${primaryRoleLabel} VR` : "Renk / VR"}</th>{dualActive && <th>{secondaryRoleLabel} VR</th>}<th>Kasa rengi</th><th>Hesap</th><th>İşlem</th></tr></thead><tbody>
               {batchRows.map((row, index) => <tr key={row.key}>
                 <td><input aria-label={`${index + 1}. cam adı`} value={row.label} maxLength={100} placeholder={`Cam ${index + 1}`} onChange={(event) => updateBatchRow(row.key, "label", event.target.value)} /></td>
                 <td><input type="number" inputMode="decimal" min="0.01" step="any" aria-label={`${index + 1}. cam eni (cm)`} value={row.width} onChange={(event) => updateBatchRow(row.key, "width", event.target.value)} /></td>
                 <td><input type="number" inputMode="decimal" min="0.01" step="any" aria-label={`${index + 1}. cam boyu (cm)`} value={row.height} onChange={(event) => updateBatchRow(row.key, "height", event.target.value)} /></td>
-                {dualActive && <td><input type="number" inputMode="decimal" min="0.01" step="any" aria-label={`${index + 1}. cam ikinci kumaş boyu (cm)`} value={row.secondary_height || ""} onChange={(event) => updateBatchRow(row.key, "secondary_height", event.target.value)} /></td>}
                 <td><input type="number" inputMode="numeric" min="1" step="1" aria-label={`${index + 1}. cam adedi`} value={row.count} onChange={(event) => updateBatchRow(row.key, "count", event.target.value)} /></td>
                 <td><input list="pos-variant-list" aria-label={`${index + 1}. cam renk / VR`} value={row.variant} maxLength={150} placeholder={measurement.variant || "Ortak renk"} onChange={(event) => updateBatchRow(row.key, "variant", event.target.value)} /></td>
                 {dualActive && <td><input list="pos-secondary-variant-list" aria-label={`${index + 1}. cam ikinci kumaş renk / VR`} value={row.secondary_variant || ""} maxLength={150} placeholder={measurement.secondary_variant || "İkinci renk"} onChange={(event) => updateBatchRow(row.key, "secondary_variant", event.target.value)} /></td>}
