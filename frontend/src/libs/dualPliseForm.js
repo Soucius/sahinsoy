@@ -4,7 +4,7 @@ import { calculateDualPliseBatch, dualPliseRole, validateDualPliseGroups } from 
 const recordId = (value) => String(value?._id ?? value ?? "");
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 
-/** The visible first product keeps its own height/VR even when it is the shade. */
+/** One glass measurement applies to both fabrics; their variants stay separate. */
 export function calculateDualSelection(primary, secondary, common = {}, rows, keyFactory) {
   if (!secondary) throw new Error("Çiftli sistem için ikinci ürünü seçin.");
   const primaryRole = dualPliseRole(primary);
@@ -14,13 +14,14 @@ export function calculateDualSelection(primary, secondary, common = {}, rows, ke
   const shade = primaryIsTul ? secondary : primary;
   const mappedCommon = {
     ...common,
+    shared_measurements: true,
     variant: primaryIsTul ? common.variant : common.secondary_variant,
     shade_variant: primaryIsTul ? common.secondary_variant : common.variant,
   };
   const mappedRows = Array.isArray(rows) ? rows.map((row) => row && typeof row === "object" && !Array.isArray(row) ? {
     ...row,
-    height: primaryIsTul ? row.height : row.secondary_height,
-    shade_height: primaryIsTul ? row.secondary_height : row.height,
+    height: row.height,
+    shade_height: row.height,
     variant: primaryIsTul ? row.variant : row.secondary_variant,
     shade_variant: primaryIsTul ? row.secondary_variant : row.variant,
   } : row) : rows;
@@ -59,8 +60,9 @@ export function restoreDualSelection(pair, currentProducts) {
   const suffix = ` / ${label}`;
   if (area === label) area = "";
   else if (area.endsWith(suffix)) area = area.slice(0, -suffix.length);
+  const legacyHeights = shadeLine.height !== tulLine.height ? { tul: tulLine.height, guneslik: shadeLine.height } : null;
   const row = {
-    width: String(shadeLine.width), height: String(shadeLine.height), secondary_height: String(tulLine.height), count: String(shadeLine.count),
+    width: String(shadeLine.width), height: legacyHeights ? "" : String(shadeLine.height), count: String(shadeLine.count),
     label, variant: shadeLine.variant || "", secondary_variant: tulLine.variant || "", case_color,
   };
   const measurement = {
@@ -69,5 +71,5 @@ export function restoreDualSelection(pair, currentProducts) {
     width: row.width, height: row.height, count: row.count, variant: row.variant, secondary_variant: row.secondary_variant,
     item_note: shadeLine.item_note || "", secondary_item_note: tulLine.item_note || "", extra_indices: [],
   };
-  return { primary, secondary, measurement, row, pair };
+  return { primary, secondary, measurement, row, pair, legacyHeights };
 }
