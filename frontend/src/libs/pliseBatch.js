@@ -6,7 +6,27 @@ export function supportsMeasurementBatch(product) {
 }
 
 export function createMeasurementRow(values = {}) {
-  return { width: String(values.width ?? ""), height: String(values.height ?? ""), count: String(values.count ?? "1"), label: String(values.label ?? ""), variant: String(values.variant ?? "") };
+  return { width: String(values.width ?? ""), height: String(values.height ?? ""), count: String(values.count ?? "1"), label: String(values.label ?? ""), variant: String(values.variant ?? ""), case_color: String(values.case_color ?? "") };
+}
+
+export function getCaseColorOptions(product) {
+  return (product?.extra_options || []).flatMap((option, index) => {
+    const name = String(option?.option_name || "").trim();
+    const label = name.slice(name.indexOf(":") + 1).trim();
+    return /^kasa\s*\/\s*donanim\s*rengi\s*:/.test(normalizeName(name)) && label ? [{ index, option_name: option.option_name, label }] : [];
+  });
+}
+
+export function selectCaseColorIndices(product, indices = [], color = "") {
+  if (!Array.isArray(indices)) throw new Error("Aksesuar seçimlerini kontrol edin.");
+  const choices = getCaseColorOptions(product);
+  const selected = String(color || "").trim();
+  const option = selected ? choices.find((choice) => String(choice.option_name).trim() === selected) : null;
+  if (selected && !option) throw new Error("Kasa rengini ürünün listesinden seçin.");
+  const colorIndices = new Set(choices.map((choice) => choice.index));
+  const result = indices.filter((index) => !colorIndices.has(index));
+  if (option) result.push(option.index);
+  return result;
 }
 
 export function calculateMeasurementBatch(product, common, rows) {
@@ -19,7 +39,8 @@ export function calculateMeasurementBatch(product, common, rows) {
       const variant = String(row.variant || "").trim() || String(common.variant || "").trim();
       const area = [String(common.area || "").trim(), label].filter(Boolean).join(" / ");
       if (area.length > 200 || variant.length > 150) throw new Error("Cam adı veya renk / VR bilgisi çok uzun.");
-      const line = calculateCurtainLine(product, { ...common, width: row.width, height: row.height, count: row.count, variant, area, case_mode: "ayri", mechanical_panels: [] });
+      const extraIndices = Object.prototype.hasOwnProperty.call(row, "case_color") ? selectCaseColorIndices(product, common.extra_indices, row.case_color) : common.extra_indices;
+      const line = calculateCurtainLine(product, { ...common, width: row.width, height: row.height, count: row.count, variant, area, extra_indices: extraIndices, case_mode: "ayri", mechanical_panels: [] });
       if (![line.quantity, line.item_total, line.pieces].every(Number.isFinite)) throw new Error("Ölçü veya tutar çok büyük.");
       return line;
     } catch (error) { throw new Error(`${index + 1}. ölçü satırı: ${error.message}`); }
