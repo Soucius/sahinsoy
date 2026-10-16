@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import Product from "../models/Product.js";
+import Product, { technicalLimitFields } from "../models/Product.js";
 import Brand from "../models/Brand.js";
 import Category from "../models/Category.js";
 import Unit from "../models/Unit.js";
@@ -7,6 +7,10 @@ import Role from "../models/Role.js";
 
 const currencies = ["TRY", "USD", "EUR"];
 const numericFields = ["width_cm", "grammage_gr", "min_m2", "rounding_step", "min_width_cm", "min_height_cm", "dimension_rounding_cm"];
+const supplierMetadataFields = ["supplier_unit", "fixed_dimensions", "technical_limits"];
+const onlyKeys = (value, keys) => value !== null && typeof value === "object" && !Array.isArray(value)
+  && Object.keys(value).every(key => keys.includes(key));
+const supplierMetadata = (record) => Object.fromEntries(supplierMetadataFields.filter(field => record[field] !== undefined).map(field => [field, record[field]]));
 
 export function normalizeCatalog(products) {
   if (!Array.isArray(products) || products.length < 1 || products.length > 3000) throw new Error("INVALID_CATALOG");
@@ -26,6 +30,25 @@ export function normalizeCatalog(products) {
     }
     if (record.unit !== "Metrekare" && (record.min_m2 || record.rounding_step || record.min_height_cm)) throw new Error("INVALID_CATALOG");
     if (record.unit === "Adet" && (record.min_width_cm || record.dimension_rounding_cm)) throw new Error("INVALID_CATALOG");
+    if (product.supplier_unit !== undefined) {
+      if (!text(product.supplier_unit)) throw new Error("INVALID_CATALOG");
+      record.supplier_unit = product.supplier_unit.trim();
+    }
+    if (product.fixed_dimensions !== undefined) {
+      if (!onlyKeys(product.fixed_dimensions, ["width_cm", "height_cm"])) throw new Error("INVALID_CATALOG");
+      const width = product.fixed_dimensions.width_cm === undefined ? 0 : product.fixed_dimensions.width_cm;
+      const height = product.fixed_dimensions.height_cm === undefined ? 0 : product.fixed_dimensions.height_cm;
+      if (!nonnegative(width) || !nonnegative(height) || (width === 0 && height === 0)) throw new Error("INVALID_CATALOG");
+      record.fixed_dimensions = { width_cm: width, height_cm: height };
+    }
+    if (product.technical_limits !== undefined) {
+      const limits = product.technical_limits;
+      if (!onlyKeys(limits, technicalLimitFields) || Object.keys(limits).length === 0
+        || Object.values(limits).some(value => !nonnegative(value) || value === 0)
+        || (limits.min_width_cm !== undefined && limits.max_width_cm !== undefined && limits.min_width_cm > limits.max_width_cm)
+        || (limits.min_height_cm !== undefined && limits.max_height_cm !== undefined && limits.min_height_cm > limits.max_height_cm)) throw new Error("INVALID_CATALOG");
+      record.technical_limits = { ...limits };
+    }
     const options = product.extra_options === undefined ? [] : product.extra_options;
     if (!Array.isArray(options) || options.length > 200) throw new Error("INVALID_CATALOG");
     const optionNames = new Set();
@@ -62,7 +85,7 @@ export async function importCatalog(req, res) {
         for(const name of new Set(records.map(p=>p.brand))){const x=await Brand.findOneAndUpdate({brand_name:name},{$setOnInsert:{brand_name:name}},{upsert:true,new:true,session});brandIds.set(name,x._id);}
         for(const name of new Set(records.map(p=>p.category))){const x=await Category.findOneAndUpdate({category_name:name},{$setOnInsert:{category_name:name}},{upsert:true,new:true,session});categoryIds.set(name,x._id);}
         for(const name of new Set(records.map(p=>p.unit))){const x=await Unit.findOneAndUpdate({unit_name:name},{$setOnInsert:{unit_name:name,unit_code:name==="Metre"?"m":name==="Metrekare"?"m²":"ad"}},{upsert:true,new:true,session});unitIds.set(name,x._id);}
-        const written=await Product.bulkWrite(records.map(p=>({updateOne:{filter:{catalog_id:p.catalog_id},update:{$setOnInsert:{catalog_id:p.catalog_id,product_name:p.name,product_barcode:`CAT-${p.catalog_id}`,product_brand:brandIds.get(p.brand),product_category:categoryIds.get(p.category),product_unit:unitIds.get(p.unit),calculation_type:p.unit==="Adet"?"adet":p.unit==="Metrekare"?"m2":"mt",purchase_price:p.purchase_price,sale_price:p.sale_price,currency:p.currency,stock_tracking:false,stock_quantity:0,variants:[],product_color:"",fabric_width_cm:p.width_cm,grammage_gr:p.grammage_gr,min_m2:p.min_m2,rounding_step:p.rounding_step,min_width_cm:p.min_width_cm,min_height_cm:p.min_height_cm,dimension_rounding_cm:p.dimension_rounding_cm,extra_options:p.extra_options}},upsert:true}})),{session,ordered:true});
+        const written=await Product.bulkWrite(records.map(p=>({updateOne:{filter:{catalog_id:p.catalog_id},update:{$setOnInsert:{catalog_id:p.catalog_id,product_name:p.name,product_barcode:`CAT-${p.catalog_id}`,product_brand:brandIds.get(p.brand),product_category:categoryIds.get(p.category),product_unit:unitIds.get(p.unit),calculation_type:p.unit==="Adet"?"adet":p.unit==="Metrekare"?"m2":"mt",purchase_price:p.purchase_price,sale_price:p.sale_price,currency:p.currency,stock_tracking:false,stock_quantity:0,variants:[],product_color:"",fabric_width_cm:p.width_cm,grammage_gr:p.grammage_gr,min_m2:p.min_m2,rounding_step:p.rounding_step,min_width_cm:p.min_width_cm,min_height_cm:p.min_height_cm,dimension_rounding_cm:p.dimension_rounding_cm,extra_options:p.extra_options,...supplierMetadata(p)}},upsert:true}})),{session,ordered:true});
         result={added:written.upsertedCount,existing:records.length-written.upsertedCount,total:records.length};
       });
     } finally {await session.endSession();}
