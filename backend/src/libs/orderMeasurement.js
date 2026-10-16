@@ -1,4 +1,4 @@
-import { calculateCurtainLine, formatNumber, PLEATS, productMode, roundMoney, roundQuantity, salePayload } from "./curtainCalculation.js";
+import { calculateCurtainLine, formatNumber, paymentConversion, PLEATS, productMode, roundMoney, roundQuantity, salePayload } from "./curtainCalculation.js";
 
 const ruleFields = ["min_m2", "rounding_step", "min_width_cm", "min_height_cm", "dimension_rounding_cm"];
 const geometryFields = ["width", "height", "billable_width", "billable_height", "profile_width_cm", "case_width", "quantity", "material_total", "labor_total", "accessories_total", "unit_price", "item_total", "calculation_note"];
@@ -184,9 +184,13 @@ export function buildMeasurementRevision(sale, input, products = []) {
   const priced = salePayload(revised, sale.pos_details.header || {}, discount, sale.status, sale.client_request_id);
   const grandTotal = roundMoney(priced.grand_total + fee);
   if (![priced.sub_total, priced.discount_amount, grandTotal].every(Number.isFinite)) throw new Error("Sipariş toplamı geçerli sayı aralığını aşıyor.");
+  const details = { ...copy(sale.pos_details), cart: revised, discount_percent: priced.discount_percent };
+  const payment = paymentConversion(grandTotal, details.header || {});
+  if (payment.currency !== "TRY") details.payment_conversion = payment;
+  else delete details.payment_conversion;
   return {
     sale_items: priced.sale_items.map((item, index) => ({ ...copy(sale.sale_items[index]), ...item, is_ordered: sale.sale_items[index].is_ordered === true })),
-    pos_details: { ...copy(sale.pos_details), cart: revised, discount_percent: priced.discount_percent },
+    pos_details: details,
     sub_total: priced.sub_total, discount_amount: priced.discount_amount, discount_percent: priced.discount_percent,
     credit_card_fee: fee, grand_total: grandTotal,
   };
