@@ -1,5 +1,19 @@
 import mongoose from "mongoose";
 
+export const technicalLimitFields = Object.freeze([
+    "min_width_cm", "min_height_cm", "max_width_cm", "max_height_cm",
+    "max_m2", "max_load_kg", "tube_diameter_mm", "slat_width_mm"
+]);
+
+const fixedDimensionsSchema = new mongoose.Schema({
+    width_cm: { type: Number, default: 0, validate: value => Number.isFinite(value) && value >= 0 },
+    height_cm: { type: Number, default: 0, validate: value => Number.isFinite(value) && value >= 0 }
+}, { _id: false, strict: "throw" });
+
+const technicalLimitsSchema = new mongoose.Schema(Object.fromEntries(technicalLimitFields.map(field => [field, {
+    type: Number, validate: value => Number.isFinite(value) && value > 0
+}])), { _id: false, strict: "throw" });
+
 const extraOptionSchema = new mongoose.Schema({
     pricing_basis: { type: String, enum: ["birim", "adet", "mt", "m2", "yuzde"], default: "birim" },
     pricing_scope: { type: String, enum: ["parca", "kasa"], default: "parca" },
@@ -14,6 +28,20 @@ const productSchema = new mongoose.Schema({
     currency: { type: String, enum: ["TRY", "USD", "EUR"], default: "TRY" },
     fabric_width_cm: { type: Number, default: 0 },
     grammage_gr: { type: Number, default: 0 },
+    supplier_unit: { type: String, trim: true, maxlength: 199, validate: value => typeof value === "string" && value.length > 0 },
+    fixed_dimensions: {
+        type: fixedDimensionsSchema,
+        default: undefined,
+        validate: value => value != null && (value.width_cm > 0 || value.height_cm > 0)
+    },
+    technical_limits: {
+        type: technicalLimitsSchema,
+        default: undefined,
+        validate: value => value != null
+            && technicalLimitFields.some(field => value[field] !== undefined)
+            && (value.min_width_cm === undefined || value.max_width_cm === undefined || value.min_width_cm <= value.max_width_cm)
+            && (value.min_height_cm === undefined || value.max_height_cm === undefined || value.min_height_cm <= value.max_height_cm)
+    },
     variants: [{ vr: { type: String, trim: true }, color: { type: String, trim: true }, stock_quantity: { type: Number, default: 0, min: 0 } }],
     product_name: {
         type: String,
