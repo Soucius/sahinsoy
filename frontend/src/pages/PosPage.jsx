@@ -4,8 +4,10 @@ import { useLocation, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "../libs/axios.js";
 import { calculateCurtainLine, defaultMeasurement, FACADES, formatMoney, formatNumber, mechanicalPanelPosition, needsControlDirection, orderTotals, paymentConversion, PLEATS, productMode, restoreSaleDraft, ROOM_PRESETS, roundMoney, salePayload, showFabricSpecs, WINDOWS } from "../libs/curtainCalculation.js";
-import { openCurtainPrint } from "../libs/curtainPrint.js";
+import { hasManufacturingItems, openCurtainPrint } from "../libs/curtainPrint.js";
 import { calculateMeasurementBatch, createMeasurementRow, getCaseColorOptions, selectCaseColorIndices, supportsMeasurementBatch } from "../libs/pliseBatch.js";
+import { dualPliseRole, getDualCaseColors, validateDualPliseGroups } from "../libs/dualPlise.js";
+import { calculateDualSelection, restoreDualSelection } from "../libs/dualPliseForm.js";
 
 const EMPTY_HEADER = { first_name: "", last_name: "", customer_phone: "", customer_address: "", delivery_date: "", delivery_method: "", payment_method: "Nakit", sale_note: "", measurement_status: "preliminary", payment_currency: "TRY", payment_currency_rate: "", payment_rate_mode: "automatic", payment_rate_source: "Harem", payment_rate_type: null, payment_rate_date: null, payment_rate_fetched_at: null, payment_rate_quoted_at: null };
 const nextKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -89,6 +91,13 @@ export default function PosPage() {
   const [batchEnabled, setBatchEnabled] = useState(false);
   const [batchRows, setBatchRows] = useState([]);
   const [batchTarget, setBatchTarget] = useState("1");
+  const [dualEnabled, setDualEnabled] = useState(false);
+  const [dualProducts, setDualProducts] = useState([]);
+  const [secondaryProduct, setSecondaryProduct] = useState(null);
+  const [dualLoading, setDualLoading] = useState(false);
+  const [dualError, setDualError] = useState("");
+  const [dualRefresh, setDualRefresh] = useState(0);
+  const [editDualPair, setEditDualPair] = useState(null);
   const [existingId, setExistingId] = useState(null);
   const [savedSale, setSavedSale] = useState(null);
   const [processing, setProcessing] = useState(false);
@@ -97,14 +106,32 @@ export default function PosPage() {
   const idempotencyKey = useRef(nextKey());
   const restoredId = useRef(null);
   const lastRoom = useRef("Salon");
+  const selectionRequest = useRef(0);
   const location = useLocation();
   const navigate = useNavigate();
   const delivered = savedSale?.status === "teslim_edildi";
   const approved = savedSale?.status === "tamamlandi" || delivered;
   const cancelled = savedSale?.status === "iptal";
   const locked = approved || cancelled;
-  const batchAvailable = Boolean(selected && !editId && supportsMeasurementBatch(selected));
-  const batchActive = batchAvailable && batchEnabled;
+  const dualRole = dualPliseRole(selected);
+  const dualActive = Boolean(dualRole && dualEnabled);
+  const batchAvailable = Boolean(selected && (!editId || dualActive) && supportsMeasurementBatch(selected));
+  const batchActive = batchAvailable && (batchEnabled || dualActive);
+  const retainedCartCount = cart.length - (editDualPair?.length || (editId ? 1 : 0));
+
+  useEffect(() => {
+    if (!dualActive || !selected) return;
+    const controller = new AbortController();
+    setDualLoading(true);
+    setDualError("");
+    api.get("/products", { signal: controller.signal, params: { search: "Plise", brand: selected.product_brand?._id || "", limit: 100 } }).then(({ data }) => {
+      if (controller.signal.aborted) return;
+      setDualProducts((data.products || []).filter((product) => { const role = dualPliseRole(product); return role && role !== dualRole; }));
+    }).catch((error) => {
+      if (!controller.signal.aborted) { setDualProducts([]); setDualError(error.response?.data?.message || "İkinci kumaşın ürün listesi alınamadı."); }
+    }).finally(() => { if (!controller.signal.aborted) setDualLoading(false); });
+    return () => controller.abort();
+  }, [dualActive, selected, dualRole, dualRefresh]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -205,13 +232,13 @@ export default function PosPage() {
   }, [totals.total, header]);
   const batchCalculation = useMemo(() => {
     if (!batchActive || !selected || !measurement) return null;
-    try { return { value: calculateMeasurementBatch(selected, measurement, batchRows), error: "" }; }
+    try { return { value: dualActive ? calculateDualSelection(selected, secondaryProduct, measurement, batchRows) : calculateMeasurementBatch(selected, measurement, batchRows), error: "" }; }
     catch (error) { return { value: null, error: error.message }; }
-  }, [batchActive, selected, measurement, batchRows]);
+  }, [batchActive, dualActive, selected, secondaryProduct, measurement, batchRows]);
   const batchPreviews = useMemo(() => batchActive && selected && measurement ? batchRows.map((row) => {
-    try { return calculateMeasurementBatch(selected, measurement, [row]).lines[0]; }
+    try { if (dualActive) { const value = calculateDualSelection(selected, secondaryProduct, measurement, [row]); return { ...value.groups[0], item_total: value.total }; } return calculateMeasurementBatch(selected, measurement, [row]).lines[0]; }
     catch { return null; }
-  }) : [], [batchActive, selected, measurement, batchRows]);
+  }) : [], [batchActive, dualActive, selected, secondaryProduct, measurement, batchRows]);
   const calculation = useMemo(() => {
     if (!selected || !measurement) return null;
     if (supportsMeasurementBatch(selected) && getCaseColorOptions(selected).filter((choice) => measurement.extra_indices.includes(choice.index)).length > 1) return { line: null, error: "Ürün için tek bir kasa rengi seçin." };
@@ -224,6 +251,7 @@ export default function PosPage() {
   const dirty = () => { setReviewed(false); setSavedSale(null); };
   const updateHeader = (key, value) => { if (locked) return; setHeader((previous) => ({ ...previous, [key]: value })); dirty(); };
   const updateMeasurement = (key, value) => setMeasurement((previous) => ({ ...previous, [key]: value }));
+  const closeProduct = () => { selectionRequest.current += 1; setSelected(null); };
   const refreshRates = () => { setFxLoading(true); setFxError(""); setFxRefresh((value) => value + 1); };
   const applyAutomaticRate = () => {
     if (locked || processing || fxLoading || !["USD", "EUR"].includes(fxContext.current.currency)) return;
@@ -279,12 +307,12 @@ export default function PosPage() {
   const updateBatchRow = (key, field, value) => setBatchRows((previous) => previous.map((row) => row.key === key ? { ...row, [field]: value } : row));
   const prepareBatchRows = () => {
     const target = Number(batchTarget);
-    if (!Number.isInteger(target) || target < 1 || target + cart.length > 1000) { toast.error("Satır sayısını kontrol edin. Bir siparişte toplam en fazla 1000 ölçü satırı bulunabilir."); return; }
+    if (!Number.isInteger(target) || target < 1 || target * (dualActive ? 2 : 1) + retainedCartCount > 1000) { toast.error("Satır sayısını kontrol edin. Bir siparişte en fazla 1000 kumaş / ürün kalemi bulunabilir."); return; }
     if (target < batchRows.length) { toast.error("Girdiğiniz ölçüler korunuyor. Fazla satırları Kaldır düğmesiyle çıkarabilirsiniz."); return; }
     setBatchRows((previous) => [...previous, ...Array.from({ length: Math.max(0, target - previous.length) }, () => ({ ...createMeasurementRow(), key: nextKey() }))]);
   };
   const appendBatchRow = (copy, index) => {
-    if (batchRows.length + cart.length >= 1000) { toast.error("Siparişin 1000 ölçü satırı sınırına ulaşıldı."); return; }
+    if ((batchRows.length + 1) * (dualActive ? 2 : 1) + retainedCartCount > 1000) { toast.error("Siparişin 1000 kumaş / ürün kalemi sınırına ulaşıldı."); return; }
     setBatchRows((previous) => {
       const rows = [...previous];
       rows.splice(index === undefined ? rows.length : index + 1, 0, { ...createMeasurementRow(copy), label: "", key: nextKey() });
@@ -292,13 +320,37 @@ export default function PosPage() {
     });
   };
 
+  const toggleDual = () => {
+    if (editDualPair) return;
+    if (dualActive) {
+      const choices = getCaseColorOptions(selected);
+      setBatchRows((previous) => previous.map((row) => ({ ...row, case_color: choices.find((choice) => choice.label === String(row.case_color || "").split(":").at(-1).trim())?.option_name || "" })));
+      if ((!batchEnabled || editId) && batchRows[0]) setMeasurement((previous) => {
+        const row = createMeasurementRow(batchRows[0]);
+        const color = choices.find((choice) => choice.label === row.case_color.split(":").at(-1).trim());
+        return { ...previous, ...row, variant: row.variant || previous.variant, secondary_variant: row.secondary_variant || previous.secondary_variant || "", extra_indices: selectCaseColorIndices(selected, previous.extra_indices, color?.option_name || "") };
+      });
+    }
+    if (!dualActive && (!batchEnabled || editId)) {
+      const color = getCaseColorOptions(selected).find((choice) => measurement.extra_indices.includes(choice.index));
+      setBatchRows([{ ...createMeasurementRow({ ...measurement, case_color: color?.option_name || "" }), key: nextKey() }]);
+      setBatchTarget("1");
+    }
+    setDualEnabled(!dualActive);
+  };
+
   const openProduct = (product) => {
     if (locked || processing) return;
+    selectionRequest.current += 1;
     const productCurrency = product.currency || product.price_currency || "TRY";
     fxContext.current = { currency: productCurrency, saved: false };
     setFxSaved(false);
     setSelected(product);
     setEditId(null);
+    setEditDualPair(null);
+    setDualEnabled(false);
+    setSecondaryProduct(null);
+    setDualProducts([]);
     setBatchEnabled(supportsMeasurementBatch(product));
     setBatchRows([{ ...createMeasurementRow(), key: nextKey() }]);
     setBatchTarget("1");
@@ -310,8 +362,27 @@ export default function PosPage() {
 
   const editLine = async (line) => {
     if (locked || processing) return;
+    const request = ++selectionRequest.current;
     try {
+      if (line.dual_plise) {
+        const pair = cart.filter((item) => item.dual_plise?.group_id === line.dual_plise.group_id);
+        const responses = await Promise.all(pair.map((item) => api.get("/products", { params: { search: item.product_name, limit: 100 } })));
+        if (request !== selectionRequest.current) return;
+        const restored = restoreDualSelection(pair, responses.flatMap((response) => response.data.products || []));
+        setSelected(restored.primary);
+        setSecondaryProduct(restored.secondary);
+        setEditDualPair(pair);
+        setEditId(null);
+        setDualEnabled(true);
+        setBatchEnabled(true);
+        setBatchRows([{ ...createMeasurementRow(restored.row), key: nextKey() }]);
+        setBatchTarget("1");
+        setMeasurement(restored.measurement);
+        setWizardStep(2);
+        return;
+      }
       const response = await api.get("/products", { params: { search: line.product_name, limit: 100 } });
+      if (request !== selectionRequest.current) return;
       const currentProduct = response.data.products?.find((item) => item._id === line.product_id);
       if (!currentProduct) throw new Error("Ürün katalogda bulunamadı. Bu kalemi kaldırıp yeniden ürün seçebilirsiniz.");
       const savedCurrency = line.original_currency || currentProduct.currency || currentProduct.price_currency || "TRY";
@@ -320,11 +391,15 @@ export default function PosPage() {
       fxContext.current = { currency: line.original_currency || product.currency || product.price_currency || "TRY", saved: true };
       setFxSaved(fxContext.current.currency !== "TRY");
       setSelected(product);
+      setDualEnabled(false);
+      setSecondaryProduct(null);
+      setEditDualPair(null);
+      setBatchRows([{ ...createMeasurementRow({ ...line, label: "", count: line.count || 1 }), key: nextKey() }]);
       setEditId(line.id);
       setBatchEnabled(false);
       setMeasurement(builderForm(product, { ...defaultMeasurement(product), case_mode: line.case_mode || "ayri", profile_width_cm: line.profile_width_cm ? String(line.profile_width_cm) : "", mechanical_panels: line.mechanical_panels || undefined, room_name: line.room_name, area: line.area, facade: line.facade, window_name: line.window_name, variant: line.variant, item_note: line.item_note, chain_direction: line.chain_direction || "", width: String(line.width), height: String(line.height), count: String(line.count || line.pieces || 1), order_mode: line.order_mode || "adet", pleat_id: PLEATS.find((option) => option.name === line.pleat_name)?.id || "sik", labor_price: String(line.labor_unit_price || 0), currency_rate: line.original_currency !== "TRY" ? String(line.currency_rate || "") : "", currency_rate_mode: line.currency_rate_mode || "manual", currency_rate_source: line.currency_rate_source || "manual", currency_rate_type: line.currency_rate_type || null, currency_rate_date: line.currency_rate_date || null, currency_rate_fetched_at: line.currency_rate_fetched_at || null, separate_right: Boolean(line.panels?.length > 1 && (line.panels[0].width !== line.panels[1].width || line.panels[0].height !== line.panels[1].height)), right_width: String(line.panels?.[1]?.width || line.width), right_height: String(line.panels?.[1]?.height || line.height), extra_indices: (product.extra_options || []).map((option, index) => line.accessories?.some((saved) => saved.name === option.option_name) ? index : -1).filter((index) => index >= 0) }));
       setWizardStep(1);
-    } catch (error) { toast.error(error.message || "Ürün düzenlenemedi."); }
+    } catch (error) { if (request === selectionRequest.current) toast.error(error.message || "Ürün düzenlenemedi."); }
   };
 
   const addLine = () => {
@@ -332,13 +407,23 @@ export default function PosPage() {
     if (!measurement.room_name.trim()) { toast.error("Oda / bölüm adını girin."); return; }
     if (batchActive) {
       if (!batchCalculation?.value) { toast.error(batchCalculation?.error || "Ölçü satırlarını kontrol edin."); return; }
-      if (cart.length + batchCalculation.value.lines.length > 1000) { toast.error("Bir siparişte toplam en fazla 1000 ölçü satırı bulunabilir."); return; }
-      const lines = batchCalculation.value.lines.map((line) => ({ ...line, id: nextKey() }));
-      setCart((previous) => [...previous, ...lines]);
+      if (retainedCartCount + batchCalculation.value.lines.length > 1000) { toast.error("Bir siparişte toplam en fazla 1000 kumaş / ürün kalemi bulunabilir."); return; }
+      const lines = batchCalculation.value.lines.map((line) => {
+        const saved = editDualPair?.find((item) => item.dual_plise.role === line.dual_plise?.role);
+        return saved ? { ...line, id: saved.id, dual_plise: { ...line.dual_plise, group_id: saved.dual_plise.group_id } } : { ...line, id: line.id || nextKey() };
+      });
+      // An edited pair must stay one physical system; new systems use new rows.
+      if (editDualPair && batchRows.length !== 1) { toast.error("Bu çiftli sistemi düzenleyin; diğer camları yeni ürün olarak ekleyin."); return; }
+      const removed = new Set(editDualPair?.map((item) => item.id) || (editId ? [editId] : []));
+      const position = cart.findIndex((item) => removed.has(item.id));
+      const updated = cart.filter((item) => !removed.has(item.id));
+      updated.splice(position < 0 ? updated.length : position, 0, ...lines);
+      try { validateDualPliseGroups(updated); } catch (error) { toast.error(error.message); return; }
+      setCart(updated);
       lastRoom.current = measurement.room_name.trim();
       dirty();
-      setSelected(null);
-      toast.success(`${lines.length} ölçü satırı / ${batchCalculation.value.pieces} adet siparişe eklendi.`);
+      closeProduct();
+      toast.success(editDualPair || editId ? "Ölçüler güncellendi." : dualActive ? `${batchCalculation.value.pieces} çiftli sistem siparişe eklendi.` : `${lines.length} ölçü satırı / ${batchCalculation.value.pieces} adet siparişe eklendi.`);
       return;
     }
     if (!calculation?.line) { toast.error(calculation?.error || "Ölçüleri kontrol edin."); return; }
@@ -347,7 +432,7 @@ export default function PosPage() {
     setCart((previous) => editId ? previous.map((item) => item.id === editId ? line : item) : [...previous, line]);
     lastRoom.current = line.room_name;
     dirty();
-    setSelected(null);
+    closeProduct();
     toast.success(editId ? "Ürün ölçüleri güncellendi." : "Ürün siparişe eklendi.");
   };
 
@@ -402,7 +487,7 @@ export default function PosPage() {
   };
 
   const newOrder = () => {
-    setCart([]); setHeader({ ...EMPTY_HEADER }); setDiscount("0"); setRecordedFee(0); setExistingId(null); setSavedSale(null); setReviewed(false); setSelected(null); setTab("products");
+    setCart([]); setHeader({ ...EMPTY_HEADER }); setDiscount("0"); setRecordedFee(0); setExistingId(null); setSavedSale(null); setReviewed(false); closeProduct(); setTab("products");
     restoredId.current = null; idempotencyKey.current = nextKey();
     paymentContext.current = { currency: "TRY", saved: false, pending: false }; setPaymentSaved(false);
     navigate("/dashboard/pos", { replace: true, state: null });
@@ -415,6 +500,10 @@ export default function PosPage() {
   const caseColors = selected && supportsMeasurementBatch(selected) ? getCaseColorOptions(selected) : [];
   const selectedCaseColors = caseColors.filter((choice) => measurement?.extra_indices?.includes(choice.index));
   const otherExtraOptions = (selected?.extra_options || []).map((option, index) => ({ option, index })).filter(({ index }) => !caseColors.some((choice) => choice.index === index));
+  const dualCaseColors = dualActive && secondaryProduct ? getDualCaseColors(selected, secondaryProduct) : [];
+  const primaryRoleLabel = dualRole === "tul" ? "Tül" : "Güneşlik";
+  const secondaryRoleLabel = dualRole === "tul" ? "Güneşlik" : "Tül";
+  const dualGroupIds = [...new Set(cart.filter((line) => line.dual_plise).map((line) => line.dual_plise.group_id))];
 
   return <div className="curtain-pos">
     <style>{POS_STYLE}</style>
@@ -448,6 +537,7 @@ export default function PosPage() {
           {!cart.length && <div className="empty">Henüz ürün eklenmedi. Ürünler sekmesinden ilk ürününüzü seçin.</div>}
           {rooms.map((room) => <div key={room}><div className="room-heading"><Home size={20} />{room || "Bölüm belirtilmedi"}</div>{cart.filter((line) => line.room_name === room).map((line) => <article className="cart-line" key={line.id}>
             <h3>{line.product_name}{line.area ? ` · ${line.area}` : ""}</h3><p className="muted">{[line.brand_name, line.variant ? `Renk / VR: ${line.variant}` : "", line.pleat_name, line.facade, line.window_name].filter(Boolean).join(" · ")}</p>
+            {line.dual_plise && <p><strong>Çiftli plise {dualGroupIds.indexOf(line.dual_plise.group_id) + 1} · {line.dual_plise.role === "tul" ? "Tül" : "Güneşlik"}</strong>{line.dual_plise.case_color ? ` · Kasa: ${line.dual_plise.case_color}` : ""}</p>}
             {hasMechanicalPanels(line) ? <MechanicalDetails line={line} /> : <>{line.chain_direction && <p>Zincir / ip yönü: <strong>{line.chain_direction}</strong></p>}{line.mode === "fon" ? <p>{line.count} {line.order_mode === "takim" ? "takım" : "adet"} · {line.pieces} kanat · {line.panels.map((panel) => `${panel.label}: ${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm`).join(" / ")}</p> : line.width || line.height ? <p>En {formatNumber(line.width)} cm · Boy {formatNumber(line.height)} cm{line.mode === "textile" ? ` · ${line.pieces} parça` : ""}</p> : null}</>}
             <p>{line.mode === "fon" || line.mode === "textile" ? "Giden kumaş" : "Miktar"}: <strong>{formatNumber(line.quantity)} {line.unit_label}</strong> × {formatMoney(line.base_unit_price)} = {formatMoney(line.material_total)}</p>
             {line.original_currency && line.original_currency !== "TRY" && <p className="muted">Siparişte kayıtlı kur: 1 {line.original_currency} = {formatExchangeRate(line.currency_rate)} ₺{line.currency_rate_source === "TCMB" && line.currency_rate_date ? ` · TCMB / ${formatRateDate(line.currency_rate_date)}` : " · Elle girilen kur"}</p>}
@@ -456,7 +546,7 @@ export default function PosPage() {
             {line.labor_total > 0 && <p>İşçilik: {formatNumber(line.quantity)} m × {formatMoney(line.labor_unit_price)} = {formatMoney(line.labor_total)}</p>}
             {line.accessories?.map((option, index) => <p className="muted" key={index}>{option.name}: {isPercentageOption(option) ? `%${formatRate(option.quantity)} → ${formatMoney(option.total)}` : `${formatNumber(option.quantity)} ${option.unit} × ${formatMoney(option.unit_price)} = ${formatMoney(option.total)}`}</p>)}
             {line.item_note && <p className="muted">Not: {line.item_note}</p>}
-            <div className="line-price"><span>{formatMoney(line.item_total)}</span>{!locked && <div className="row"><button disabled={processing} onClick={() => editLine(line)}>Düzenle</button><button className="button-danger" aria-label={`${line.product_name} kalemini kaldır`} disabled={processing} onClick={() => { setCart((previous) => previous.filter((item) => item.id !== line.id)); dirty(); }}><Trash2 size={16} />Kaldır</button></div>}</div>
+            <div className="line-price"><span>{formatMoney(line.item_total)}</span>{!locked && <div className="row"><button disabled={processing} onClick={() => editLine(line)}>{line.dual_plise ? "Çiftli sistemi düzenle" : "Düzenle"}</button><button className="button-danger" aria-label={`${line.product_name} kalemini kaldır`} disabled={processing} onClick={() => { setCart((previous) => previous.filter((item) => line.dual_plise ? item.dual_plise?.group_id !== line.dual_plise.group_id : item.id !== line.id)); dirty(); }}><Trash2 size={16} />{line.dual_plise ? "Çiftli sistemi kaldır" : "Kaldır"}</button></div>}</div>
           </article>)}</div>)}
           <div className="actions divider"><button disabled={processing || locked} onClick={() => setTab("products")}><ArrowLeft size={18} />Ürün eklemeye dön</button></div>
         </section>
@@ -494,12 +584,12 @@ export default function PosPage() {
         <button disabled={!cart.length || processing || locked} onClick={() => saveOrder("beklemede")}>{processing ? <Loader2 className="spin" size={18} /> : null}Beklemede</button>
         <button className="primary" disabled={!cart.length || processing || locked} onClick={() => saveOrder("tamamlandi")}>{processing ? <Loader2 className="spin" size={18} /> : <CheckCircle size={18} />}Siparişi onayla</button>
       </div>
-      <div className="actions divider">{savedSale && !cancelled && !delivered && <button className="primary" disabled={processing} onClick={() => navigate(`/dashboard/sales/${savedSale._id}/measurements`)}><ClipboardList size={18} />Ölçü / Teyit</button>}<button disabled={!approved || processing} onClick={() => printOrder("customer")}><Printer size={18} />Müşteri sipariş kağıdı · A4 / PDF</button><button disabled={!approved || processing} onClick={() => printOrder("manufacturing")}><Printer size={18} />Atölye takip formu · A4 / PDF</button>{locked && <button onClick={newOrder}><Plus size={18} />Yeni sipariş</button>}</div>
+      <div className="actions divider">{savedSale && !cancelled && !delivered && <button className="primary" disabled={processing} onClick={() => navigate(`/dashboard/sales/${savedSale._id}/measurements`)}><ClipboardList size={18} />Ölçü / Teyit</button>}<button disabled={!approved || processing} onClick={() => printOrder("customer")}><Printer size={18} />Müşteri sipariş kağıdı · A4 / PDF</button><button disabled={!approved || processing || !hasManufacturingItems(cart)} onClick={() => printOrder("manufacturing")}><Printer size={18} />Atölye takip formu · A4 / PDF</button>{locked && <button onClick={newOrder}><Plus size={18} />Yeni sipariş</button>}</div>
       {!locked && <p className="muted" style={{ marginTop: 12 }}>İmalat ve müşteri çıktıları, sipariş onaylanıp kaydedildikten sonra açılır.</p>}
     </div>}
 
-    {selected && measurement && <div className="modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) setSelected(null); }}><section className={`modal${batchActive ? " modal-measurements" : ""}`} role="dialog" aria-modal="true" aria-labelledby="pos-product-heading">
-      <div className="modal-heading"><div><h2 id="pos-product-heading">{selected.product_name}</h2><p className="muted">{selected.product_brand?.brand_name} · Adım {wizardStep} / 2: {wizardStep === 1 ? "Oda, cephe ve pencere" : "Ölçü ve fiyat"}</p></div><button className="modal-close" aria-label="Ürün penceresini kapat" onClick={() => setSelected(null)}><X size={23} /></button></div>
+    {selected && measurement && <div className="modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) closeProduct(); }}><section className={`modal${batchActive ? " modal-measurements" : ""}`} role="dialog" aria-modal="true" aria-labelledby="pos-product-heading">
+      <div className="modal-heading"><div><h2 id="pos-product-heading">{selected.product_name}</h2><p className="muted">{selected.product_brand?.brand_name} · Adım {wizardStep} / 2: {wizardStep === 1 ? "Oda, cephe ve pencere" : "Ölçü ve fiyat"}</p></div><button className="modal-close" aria-label="Ürün penceresini kapat" onClick={closeProduct}><X size={23} /></button></div>
       {wizardStep === 1 ? <>
         <h3 className="choice-label">Oda / bölüm seçin</h3>
         <div role="group" aria-label="Oda seçenekleri" className="pos-room-options">
@@ -507,10 +597,12 @@ export default function PosPage() {
         </div>
         <div className="fields divider"><Field label="Oda / bölüm adı"><input value={measurement.room_name} onChange={(event) => updateMeasurement("room_name", event.target.value)} placeholder="Oda seçin veya kendi oda adınızı yazın" maxLength={100} aria-describedby="pos-room-name-hint" disabled={locked || processing} /></Field><Field label="Bölüm / cam adı (isteğe bağlı)"><input value={measurement.area} maxLength={100} onChange={(event) => updateMeasurement("area", event.target.value)} placeholder="Örn. balkon kapısı" /></Field></div>
         <p id="pos-room-name-hint" className="muted">İstediğiniz kadar oda ekleyebilirsiniz. Örn. Yatak Odası 2, Çocuk Odası 2. Eklediğiniz oda adları sonraki ürünlerde tekrar seçilebilir.</p>
-        <p className="choice-label">Hangi cephe? <span className="muted">İsteğe bağlı</span></p><div className="row">{FACADES.map((facade) => <button key={facade} className="chip" aria-pressed={measurement.facade === facade} onClick={() => updateMeasurement("facade", measurement.facade === facade ? "" : facade)}>{facade}</button>)}</div><p className="choice-label">Hangi pencere? <span className="muted">İsteğe bağlı</span></p><div className="row">{WINDOWS.map((windowName) => <button key={windowName} className="chip" aria-pressed={measurement.window_name === windowName} onClick={() => updateMeasurement("window_name", measurement.window_name === windowName ? "" : windowName)}>{windowName}</button>)}</div><p className="muted divider">Her cepheyi ayrı ürün kalemi olarak ekleyebilirsiniz. Oda ve ürün kalemi sayısında sınır yok.</p><div className="actions divider"><button onClick={() => setSelected(null)}>İptal</button><button className="primary" onClick={() => { if (!measurement.room_name.trim()) toast.error("Oda / bölüm adını girin."); else setWizardStep(2); }}>İleri<ArrowRight size={18} /></button></div>
+        <p className="choice-label">Hangi cephe? <span className="muted">İsteğe bağlı</span></p><div className="row">{FACADES.map((facade) => <button key={facade} className="chip" aria-pressed={measurement.facade === facade} onClick={() => updateMeasurement("facade", measurement.facade === facade ? "" : facade)}>{facade}</button>)}</div><p className="choice-label">Hangi pencere? <span className="muted">İsteğe bağlı</span></p><div className="row">{WINDOWS.map((windowName) => <button key={windowName} className="chip" aria-pressed={measurement.window_name === windowName} onClick={() => updateMeasurement("window_name", measurement.window_name === windowName ? "" : windowName)}>{windowName}</button>)}</div><p className="muted divider">Her cepheyi ayrı ürün kalemi olarak ekleyebilirsiniz. Oda ve ürün kalemi sayısında sınır yok.</p><div className="actions divider"><button onClick={closeProduct}>İptal</button><button className="primary" onClick={() => { if (!measurement.room_name.trim()) toast.error("Oda / bölüm adını girin."); else setWizardStep(2); }}>İleri<ArrowRight size={18} /></button></div>
       </> : <>
-        {batchAvailable && <div className="row" role="group" aria-label="Ölçü giriş şekli"><button type="button" className="chip" aria-pressed={batchEnabled} onClick={() => setBatchEnabled(true)}>Çoklu ölçü listesi</button><button type="button" className="chip" aria-pressed={!batchEnabled} onClick={() => setBatchEnabled(false)}>Tek ölçü</button></div>}
-        <div className="fields"><Field label={panelBuilderActive || batchActive ? "Ortak renk / VR numarası (isteğe bağlı)" : "Renk / VR numarası"} full><input list="pos-variant-list" value={measurement.variant} maxLength={150} onChange={(event) => updateMeasurement("variant", event.target.value)} placeholder="Renk / VR seçin veya yazın" /><datalist id="pos-variant-list">{(selected.variants || []).map((variant, index) => { const label = typeof variant === "string" ? variant : [variant.vr || variant.vr_number || variant.variant_code || variant.code, variant.color || variant.color_name].filter(Boolean).join(" · "); return <option key={index} value={label} />; })}</datalist></Field>
+        {dualRole && <div className="review-card"><label className="check"><input type="checkbox" checked={dualActive} disabled={Boolean(editDualPair)} onChange={toggleDual} />Çiftli sisteme çevir · tül + güneşlik</label>{dualActive && <><p className="muted">İlk ürün: {selected.product_name} · {primaryRoleLabel}. İkinci kumaşı aşağıdan seçin. Her kumaş kendi boyu, VR’si ve minimum 1 m² kuralıyla hesaplanır; tutarları toplanır.</p><Field label={`İkinci kumaş · ${secondaryRoleLabel}`}><select value={secondaryProduct?._id || ""} disabled={dualLoading || Boolean(editDualPair)} onChange={(event) => setSecondaryProduct(dualProducts.find((product) => product._id === event.target.value) || null)}><option value="">{dualLoading ? "Ürünler yükleniyor…" : "Seri seçin"}</option>{[...dualProducts, ...(secondaryProduct && !dualProducts.some((product) => product._id === secondaryProduct._id) ? [secondaryProduct] : [])].map((product) => <option key={product._id} value={product._id}>{product.product_name} · {formatMoney(product.sale_price)} / m²</option>)}</select></Field>{dualError && <p className="error">{dualError} <button type="button" onClick={() => setDualRefresh((value) => value + 1)}>Yeniden dene</button></p>}<p className="muted">Aynı cam için ortak en ve kasa rengi; iki ayrı boy ve renk / VR girilir. Ek çiftli mekanizma ücreti uygulanmaz.</p></>}</div>}
+        {batchAvailable && !dualActive && <div className="row" role="group" aria-label="Ölçü giriş şekli"><button type="button" className="chip" aria-pressed={batchEnabled} onClick={() => setBatchEnabled(true)}>Çoklu ölçü listesi</button><button type="button" className="chip" aria-pressed={!batchEnabled} onClick={() => setBatchEnabled(false)}>Tek ölçü</button></div>}
+        <div className="fields"><Field label={dualActive ? `${primaryRoleLabel} · ortak renk / VR (isteğe bağlı)` : panelBuilderActive || batchActive ? "Ortak renk / VR numarası (isteğe bağlı)" : "Renk / VR numarası"} full><input list="pos-variant-list" value={measurement.variant} maxLength={150} onChange={(event) => updateMeasurement("variant", event.target.value)} placeholder="Renk / VR seçin veya yazın" /><datalist id="pos-variant-list">{(selected.variants || []).map((variant, index) => { const label = typeof variant === "string" ? variant : [variant.vr || variant.vr_number || variant.variant_code || variant.code, variant.color || variant.color_name].filter(Boolean).join(" · "); return <option key={index} value={label} />; })}</datalist></Field>
+          {dualActive && <Field label={`${secondaryRoleLabel} · ortak renk / VR (isteğe bağlı)`} full><input list="pos-secondary-variant-list" value={measurement.secondary_variant || ""} maxLength={150} onChange={(event) => updateMeasurement("secondary_variant", event.target.value)} placeholder="İkinci kumaşın renk / VR’si" /><datalist id="pos-secondary-variant-list">{(secondaryProduct?.variants || []).map((variant, index) => <option key={index} value={typeof variant === "string" ? variant : [variant.vr || variant.vr_number || variant.variant_code || variant.code, variant.color || variant.color_name].filter(Boolean).join(" · ")} />)}</datalist></Field>}
           {mode === "fon" && <Field label="Satış şekli"><select value={measurement.order_mode} onChange={(event) => updateMeasurement("order_mode", event.target.value)}><option value="takim">Takım · 2 kanat</option><option value="adet">Adet · tek kanat</option></select></Field>}
           {!batchActive && caseColors.length > 0 && <Field label="Kasa rengi"><select value={selectedCaseColors.length === 1 ? selectedCaseColors[0].option_name : ""} onChange={(event) => setMeasurement((previous) => ({ ...previous, extra_indices: selectCaseColorIndices(selected, previous.extra_indices, event.target.value) }))}><option value="">Seçilmedi</option>{caseColors.map((choice) => <option key={choice.option_name} value={choice.option_name}>{choice.label}</option>)}</select></Field>}
           {!batchActive && <NumberField label={panelBuilderActive ? "Bu ölçü grubundan kaç adet?" : mode === "textile" ? "Parça sayısı" : (mode === "fon" && measurement.order_mode === "takim") || selected.supplier_unit === "Takım" ? "Takım adedi" : "Adet sayısı"} value={measurement.count} onChange={(value) => updateMeasurement("count", value)} min={1} step={1} />}
@@ -529,24 +621,26 @@ export default function PosPage() {
           </div>}
         </div>
         {batchActive && <fieldset className="divider" disabled={locked || processing}>
-          <h3>Cam ölçü listesi</h3><p className="muted">Her camın enini ve boyunu ayrı girin. Aynı ölçüden birden fazlaysa Adet alanını kullanın. Her satırın minimum m² ve yuvarlama hesabı ayrı yapılır.</p>
-          <div className="row"><NumberField label="Toplam ölçü satırı" value={batchTarget} min={1} step={1} onChange={setBatchTarget} /><button type="button" onClick={prepareBatchRows}>Satırları hazırla</button></div>
+          <h3>{dualActive ? "Çiftli cam ölçü listesi" : "Cam ölçü listesi"}</h3><p className="muted">{dualActive ? "Her cam için iki kumaşın boyunu ayrı girin. Her kumaşa ayrı minimum 1 m² uygulanır. Adet, çiftli sistem sayısıdır." : "Her camın enini ve boyunu ayrı girin. Aynı ölçüden birden fazlaysa Adet alanını kullanın. Her satırın minimum m² ve yuvarlama hesabı ayrı yapılır."}</p>
+          {!editDualPair && <div className="row"><NumberField label="Toplam ölçü satırı" value={batchTarget} min={1} step={1} onChange={setBatchTarget} /><button type="button" onClick={prepareBatchRows}>Satırları hazırla</button></div>}
           <div className="measure-list" role="region" aria-label="Cam ölçüleri" tabIndex={0}>
-            <table><thead><tr><th>Cam / bölüm</th><th>En (cm)</th><th>Boy (cm)</th><th>Adet</th><th>Renk / VR</th><th>Kasa rengi</th><th>Hesap</th><th>İşlem</th></tr></thead><tbody>
+            <table><thead><tr><th>Cam / bölüm</th><th>En (cm)</th><th>{dualActive ? `${primaryRoleLabel} boyu` : "Boy"} (cm)</th>{dualActive && <th>{secondaryRoleLabel} boyu (cm)</th>}<th>Adet</th><th>{dualActive ? `${primaryRoleLabel} VR` : "Renk / VR"}</th>{dualActive && <th>{secondaryRoleLabel} VR</th>}<th>Kasa rengi</th><th>Hesap</th><th>İşlem</th></tr></thead><tbody>
               {batchRows.map((row, index) => <tr key={row.key}>
                 <td><input aria-label={`${index + 1}. cam adı`} value={row.label} maxLength={100} placeholder={`Cam ${index + 1}`} onChange={(event) => updateBatchRow(row.key, "label", event.target.value)} /></td>
                 <td><input type="number" inputMode="decimal" min="0.01" step="any" aria-label={`${index + 1}. cam eni (cm)`} value={row.width} onChange={(event) => updateBatchRow(row.key, "width", event.target.value)} /></td>
                 <td><input type="number" inputMode="decimal" min="0.01" step="any" aria-label={`${index + 1}. cam boyu (cm)`} value={row.height} onChange={(event) => updateBatchRow(row.key, "height", event.target.value)} /></td>
+                {dualActive && <td><input type="number" inputMode="decimal" min="0.01" step="any" aria-label={`${index + 1}. cam ikinci kumaş boyu (cm)`} value={row.secondary_height || ""} onChange={(event) => updateBatchRow(row.key, "secondary_height", event.target.value)} /></td>}
                 <td><input type="number" inputMode="numeric" min="1" step="1" aria-label={`${index + 1}. cam adedi`} value={row.count} onChange={(event) => updateBatchRow(row.key, "count", event.target.value)} /></td>
                 <td><input list="pos-variant-list" aria-label={`${index + 1}. cam renk / VR`} value={row.variant} maxLength={150} placeholder={measurement.variant || "Ortak renk"} onChange={(event) => updateBatchRow(row.key, "variant", event.target.value)} /></td>
-                <td><select aria-label={`${index + 1}. cam kasa rengi`} value={row.case_color || ""} disabled={!caseColors.length} onChange={(event) => updateBatchRow(row.key, "case_color", event.target.value)}><option value="">{caseColors.length ? "Seçilmedi" : "Renk tanımlı değil"}</option>{caseColors.map((choice) => <option key={choice.option_name} value={choice.option_name}>{choice.label}{selected.extra_options[choice.index].price_impact > 0 ? ` · ${formatMoney(selected.extra_options[choice.index].price_impact, selected.extra_options[choice.index].currency || currency)} / ${accessoryUnit(selected.extra_options[choice.index], selected)}` : ""}</option>)}</select></td>
-                <td>{batchPreviews[index] ? <><strong>{formatMoney(batchPreviews[index].item_total)}</strong><p className="muted">{formatNumber(batchPreviews[index].quantity)} m²</p></> : "—"}</td>
-                <td><div className="row"><button type="button" aria-label={`${index + 1}. ölçüyü kopyala`} title="Kopyala" onClick={() => appendBatchRow(row, index)}><Copy size={17} /></button><button type="button" className="button-danger" aria-label={`${index + 1}. ölçüyü kaldır`} title="Kaldır" disabled={batchRows.length <= 1} onClick={() => setBatchRows((previous) => previous.filter((item) => item.key !== row.key))}><Trash2 size={17} /></button></div></td>
+                {dualActive && <td><input list="pos-secondary-variant-list" aria-label={`${index + 1}. cam ikinci kumaş renk / VR`} value={row.secondary_variant || ""} maxLength={150} placeholder={measurement.secondary_variant || "İkinci renk"} onChange={(event) => updateBatchRow(row.key, "secondary_variant", event.target.value)} /></td>}
+                <td><select aria-label={`${index + 1}. cam kasa rengi`} value={dualActive ? (row.case_color || "").split(":").at(-1).trim() : row.case_color || ""} disabled={dualActive ? !dualCaseColors.length : !caseColors.length} onChange={(event) => updateBatchRow(row.key, "case_color", event.target.value)}><option value="">Seçilmedi</option>{(dualActive ? dualCaseColors : caseColors).map((choice) => <option key={choice.option_name} value={dualActive ? choice.label : choice.option_name}>{choice.label}{!dualActive && selected.extra_options[choice.index].price_impact > 0 ? ` · ${formatMoney(selected.extra_options[choice.index].price_impact, selected.extra_options[choice.index].currency || currency)} / ${accessoryUnit(selected.extra_options[choice.index], selected)}` : ""}</option>)}</select></td>
+                <td>{batchPreviews[index] ? <><strong>{formatMoney(batchPreviews[index].item_total)}</strong><p className="muted">{dualActive ? `Tül ${formatNumber(batchPreviews[index].tul.quantity)} + güneşlik ${formatNumber(batchPreviews[index].guneslik.quantity)} m²` : `${formatNumber(batchPreviews[index].quantity)} m²`}</p></> : "—"}</td>
+                <td><div className="row"><button type="button" aria-label={`${index + 1}. ölçüyü kopyala`} title="Kopyala" disabled={Boolean(editDualPair)} onClick={() => appendBatchRow(row, index)}><Copy size={17} /></button><button type="button" className="button-danger" aria-label={`${index + 1}. ölçüyü kaldır`} title="Kaldır" disabled={batchRows.length <= 1} onClick={() => setBatchRows((previous) => previous.filter((item) => item.key !== row.key))}><Trash2 size={17} /></button></div></td>
               </tr>)}
             </tbody></table>
           </div>
-          <button type="button" onClick={() => appendBatchRow()}><Plus size={18} />Ölçü satırı ekle</button>
-          <p className="muted">Oda, cephe, ortak renk / VR ve aşağıdaki aksesuarlar tüm satırlara uygulanır. Kasa rengi her satırda ayrı seçilir. Satırdaki renk / VR doluysa o renk kullanılır. Her satır siparişte ve imalat formunda ayrı görünür.</p>
+          {!editDualPair && <button type="button" onClick={() => appendBatchRow()}><Plus size={18} />Ölçü satırı ekle</button>}
+          <p className="muted">{dualActive ? "Her satır aynı camdaki tül ve güneşliği birlikte oluşturur. İki kumaşın birim fiyatları ayrı uygulanıp toplanır. Kasa rengi her camda ayrı seçilir." : "Oda, cephe, ortak renk / VR ve aşağıdaki aksesuarlar tüm satırlara uygulanır. Kasa rengi her satırda ayrı seçilir. Satırdaki renk / VR doluysa o renk kullanılır. Her satır siparişte ve imalat formunda ayrı görünür."}</p>
         </fieldset>}
         {selected.fixed_dimensions?.width_cm > 0 && <p className="muted">Bu ürünün eni sabittir. Farklı en için uygun ölçüdeki ürünü seçin.</p>}
         {selected.technical_limits && <p className="muted">Sistem sınırları: {[["min_width_cm", "En en az", "cm"], ["max_width_cm", "En en çok", "cm"], ["min_height_cm", "Boy en az", "cm"], ["max_height_cm", "Boy en çok", "cm"], ["max_m2", "Alan en çok", "m²"], ["max_load_kg", "Yük en çok", "kg"], ["tube_diameter_mm", "Boru çapı", "mm"], ["slat_width_mm", "Lamel eni", "mm"]].filter(([key]) => selected.technical_limits[key] > 0).map(([key, label, unit]) => `${label} ${formatNumber(selected.technical_limits[key])} ${unit}`).join(" · ")}. Ölçü girildiğinde ölçü sınırları kontrol edilir; ağırlık ve donanım uyumunu ayrıca kontrol edin.</p>}
@@ -562,11 +656,11 @@ export default function PosPage() {
         {directionRequired && !panelBuilderActive && <div className="divider"><h3 className="choice-label">Zincir / ip yönü</h3><div role="group" aria-label="Zincir / ip yönü" className="row">{["Sağ", "Sol"].map((direction) => <button key={direction} type="button" className="chip" style={{ minWidth: 120 }} aria-pressed={measurement.chain_direction === direction} disabled={locked || processing} onClick={() => updateMeasurement("chain_direction", direction)}>{direction}</button>)}</div><p className="muted">Ürünün zincir / ip yönünü seçin.</p></div>}
         {selected.calculation_type === "m2" && <div className="notice" style={{ marginTop: 12 }}><strong>m² hesap kuralları</strong><p>Fiyat, en × boy ve adet üzerinden hesaplanır. İmalat için girdiğiniz ölçüler korunur.</p>{Number(selected.min_width_cm) > 0 && <p>Hesapta minimum en: {formatNumber(selected.min_width_cm)} cm</p>}{Number(selected.min_height_cm) > 0 && <p>Hesapta minimum boy: {formatNumber(selected.min_height_cm)} cm</p>}{Number(selected.dimension_rounding_cm) > 0 && <p>Hesapta en ve boy {formatNumber(selected.dimension_rounding_cm)} cm'lik adımlara yukarı yuvarlanır.</p>}{Number(selected.min_m2) > 0 && <p>Minimum miktar: {formatNumber(selected.min_m2)} m² / adet</p>}{Number(selected.rounding_step) > 0 && <p>m² miktarı {formatNumber(selected.rounding_step)} m² adımına yukarı yuvarlanır.</p>}</div>}
         {currency !== "TRY" && <p className="muted">Fiyat {formatMoney(selected.sale_price, currency)} / birim. Seçilen kur bu ürün kalemine kaydedilir; sonraki kur yenilemeleri bu tutarı değiştirmez.</p>}
-        {Boolean(otherExtraOptions.length) && <div className="divider"><h3>{caseColors.length ? "Diğer aksesuar seçenekleri" : "Aksesuar / etek / kasa seçenekleri"}</h3>{otherExtraOptions.map(({ option, index }) => <label className="accessory" key={option._id || index}><input type="checkbox" checked={measurement.extra_indices.includes(index)} onChange={(event) => updateMeasurement("extra_indices", event.target.checked ? [...measurement.extra_indices, index] : measurement.extra_indices.filter((item) => item !== index))} /><span>{option.option_name}<span className="muted"> · {isPercentageOption(option) ? `%${formatRate(option.price_impact)}` : `${formatMoney(option.price_impact, option.currency || currency)} / ${accessoryUnit(option, selected)}`}</span></span></label>)}</div>}
-        {selected.extra_options?.some((option) => option.pricing_basis === "mt" || option.calculation_type === "mt") && <p className="muted">Metreli aksesuarlar gerçek en üzerinden hesaplanır.</p>}
+        {!dualActive && Boolean(otherExtraOptions.length) && <div className="divider"><h3>{caseColors.length ? "Diğer aksesuar seçenekleri" : "Aksesuar / etek / kasa seçenekleri"}</h3>{otherExtraOptions.map(({ option, index }) => <label className="accessory" key={option._id || index}><input type="checkbox" checked={measurement.extra_indices.includes(index)} onChange={(event) => updateMeasurement("extra_indices", event.target.checked ? [...measurement.extra_indices, index] : measurement.extra_indices.filter((item) => item !== index))} /><span>{option.option_name}<span className="muted"> · {isPercentageOption(option) ? `%${formatRate(option.price_impact)}` : `${formatMoney(option.price_impact, option.currency || currency)} / ${accessoryUnit(option, selected)}`}</span></span></label>)}</div>}
+        {!dualActive && selected.extra_options?.some((option) => option.pricing_basis === "mt" || option.calculation_type === "mt") && <p className="muted">Metreli aksesuarlar gerçek en üzerinden hesaplanır.</p>}
         <Field label="Ürün / imalat notu" full><textarea maxLength={500} value={measurement.item_note} onChange={(event) => updateMeasurement("item_note", event.target.value)} placeholder="Örn. etek modeli, kasa rengi…" /></Field>
         <div className="price-box" aria-live="polite">{batchActive ? (batchCalculation?.value ? <><p><strong>{batchRows.length} ölçü satırı · {batchCalculation.value.pieces} adet</strong></p><p>Toplam hesaplanan miktar: <strong>{formatNumber(batchCalculation.value.quantity)} m²</strong></p><p className="big">{formatMoney(batchCalculation.value.total)}</p><p className="muted">Her camın fiyatı kendi ölçüsü ve adedine göre ayrı hesaplandı.</p></> : <p className="error">{batchCalculation?.error}</p>) : calculation?.line ? <><MechanicalDetails line={calculation.line} /><p>{mode === "fon" || mode === "textile" ? "Giden kumaş" : "Hesaplanan miktar"}: <strong>{formatNumber(calculation.line.quantity)} {calculation.line.unit_label}</strong>{mode === "fon" ? ` · ${calculation.line.pieces} kanat` : ""}</p>{hasBillingDimensions(calculation.line) && <p>Hesap ölçüsü: {formatNumber(calculation.line.billable_width)} × {formatNumber(calculation.line.billable_height)} cm</p>}<p>{formatNumber(calculation.line.quantity)} {calculation.line.unit_label} × {formatMoney(calculation.line.base_unit_price)} = {formatMoney(calculation.line.material_total)}</p>{calculation.line.labor_total > 0 && <p>İşçilik: {formatNumber(calculation.line.quantity)} m × {formatMoney(calculation.line.labor_unit_price)} = {formatMoney(calculation.line.labor_total)}</p>}{calculation.line.accessories_total > 0 && <p>Aksesuarlar: {formatMoney(calculation.line.accessories_total)}</p>}<p className="muted">{calculation.line.calculation_note}</p><p className="big">{formatMoney(calculation.line.item_total)}</p></> : <p className="error">{calculation?.error}</p>}</div>
-        <div className="actions"><button onClick={() => setWizardStep(1)}><ArrowLeft size={18} />Geri</button><button className="primary" disabled={(batchActive ? !batchCalculation?.value : !calculation?.line) || locked || processing} onClick={addLine}><Plus size={18} />{editId ? "Değişiklikleri kaydet" : batchActive ? "Tüm ölçüleri siparişe ekle" : "Siparişe ekle"}</button></div>
+        <div className="actions"><button onClick={() => setWizardStep(1)}><ArrowLeft size={18} />Geri</button><button className="primary" disabled={(batchActive ? !batchCalculation?.value : !calculation?.line) || locked || processing} onClick={addLine}><Plus size={18} />{editId || editDualPair ? "Değişiklikleri kaydet" : batchActive ? "Tüm ölçüleri siparişe ekle" : "Siparişe ekle"}</button></div>
       </>}
     </section></div>}
   </div>;
