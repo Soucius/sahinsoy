@@ -1,4 +1,5 @@
 import { calculateCurtainLine, formatNumber, paymentConversion, PLEATS, productMode, roundMoney, roundQuantity, salePayload } from "./curtainCalculation.js";
+import { validateDualPliseGroups } from "./dualPlise.js";
 
 const ruleFields = ["min_m2", "rounding_step", "min_width_cm", "min_height_cm", "dimension_rounding_cm"];
 const geometryFields = ["width", "height", "billable_width", "billable_height", "profile_width_cm", "case_width", "quantity", "material_total", "labor_total", "accessories_total", "unit_price", "item_total", "calculation_note"];
@@ -48,9 +49,18 @@ export function measurementFormForLine(line) {
   return form;
 }
 
+/** A dual plise shares its actual glass width; its two fabric heights stay independent. */
+export function changeMeasurementForms(cart, forms, lineIndex, key, value) {
+  const group = cart[lineIndex]?.dual_plise?.group_id;
+  return forms.map((form, index) => index === lineIndex || (key === "width" && group && cart[index]?.dual_plise?.group_id === group)
+    ? { ...form, [key]: value }
+    : form);
+}
+
 export function measurementSummary(line) {
   const { panels, team } = lineShape(line);
   const size = (panel) => `${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm`;
+  if (line.dual_plise) return `${line.dual_plise.glass_label} · ${line.dual_plise.role === "tul" ? "Tül" : "Güneşlik"}: ${size(line)} · Kasa rengi: ${line.dual_plise.case_color || "Seçilmedi"}`;
   if (panels) return line.mechanical_panels.map((panel, index) => `${panel.position || `${index + 1}. parça`}: ${size(panel)}`).join(" · ");
   if (team) return `Sol: ${size(line.panels[0])} · Sağ: ${size(line.panels[1])}`;
   return size(line);
@@ -167,6 +177,7 @@ export function buildMeasurementRevision(sale, input, products = []) {
   rejectUnknown(input, ["measurements"], "Ölçü güncellemesi");
   const cart = sale?.pos_details?.cart;
   if (!Array.isArray(cart) || !cart.length || !Array.isArray(sale.sale_items) || sale.sale_items.length !== cart.length) throw new Error("Bu eski siparişin ayrıntılı POS ölçü kaydı bulunmuyor. Ölçü güncellemesi için yeni bir sipariş oluşturun.");
+  validateDualPliseGroups(cart);
   if (!Array.isArray(input.measurements) || input.measurements.length !== cart.length) throw new Error("Ölçü güncellemesinde siparişin bütün ürünleri yer almalıdır; ürün eklenemez veya çıkarılamaz.");
   const measurements = new Map();
   for (const entry of input.measurements) {
@@ -183,6 +194,7 @@ export function buildMeasurementRevision(sale, input, products = []) {
     const matches = Array.isArray(products) ? products.filter((product) => recordId(product._id) === recordId(line.product_id)) : [];
     return reviseLine(line, measurements.get(id), matches.length === 1 ? matches[0] : null);
   });
+  validateDualPliseGroups(revised);
   const discount = number(sale.discount_percent ?? sale.pos_details.discount_percent ?? 0, "Kayıtlı iskonto oranı");
   const fee = number(sale.credit_card_fee ?? 0, "Kayıtlı kredi kartı farkı");
   const priced = salePayload(revised, sale.pos_details.header || {}, discount, sale.status, sale.client_request_id);
