@@ -3,13 +3,21 @@ import { ArrowLeft, ArrowRight, CheckCircle, ClipboardList, Home, Loader2, Packa
 import { useLocation, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "../libs/axios.js";
-import { calculateCurtainLine, defaultMeasurement, FACADES, formatMoney, formatNumber, mechanicalPanelPosition, needsControlDirection, orderTotals, PLEATS, productMode, restoreSaleDraft, ROOM_PRESETS, salePayload, showFabricSpecs, WINDOWS } from "../libs/curtainCalculation.js";
+import { calculateCurtainLine, defaultMeasurement, FACADES, formatMoney, formatNumber, mechanicalPanelPosition, needsControlDirection, orderTotals, paymentConversion, PLEATS, productMode, restoreSaleDraft, ROOM_PRESETS, roundMoney, salePayload, showFabricSpecs, WINDOWS } from "../libs/curtainCalculation.js";
 import { openCurtainPrint } from "../libs/curtainPrint.js";
 
-const EMPTY_HEADER = { first_name: "", last_name: "", customer_phone: "", customer_address: "", delivery_date: "", delivery_method: "", payment_method: "Nakit", sale_note: "", measurement_status: "preliminary" };
+const EMPTY_HEADER = { first_name: "", last_name: "", customer_phone: "", customer_address: "", delivery_date: "", delivery_method: "", payment_method: "Nakit", sale_note: "", measurement_status: "preliminary", payment_currency: "TRY", payment_currency_rate: "", payment_rate_mode: "automatic", payment_rate_source: "Harem", payment_rate_type: null, payment_rate_date: null, payment_rate_fetched_at: null, payment_rate_quoted_at: null };
 const nextKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const isPercentageOption = (option) => option.pricing_basis === "yuzde" || option.unit === "%";
 const formatRate = (value) => Number(value || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
+const formatExchangeRate = (value) => Number(value).toLocaleString("tr-TR", { minimumFractionDigits: 4, maximumFractionDigits: 6 });
+const formatRateDate = (value) => value ? value.split("-").reverse().join(".") : "";
+const rateFields = (quote, currency) => ({ currency_rate: quote ? String(quote.rates[currency]) : "", currency_rate_mode: "automatic", currency_rate_source: quote?.source || "", currency_rate_type: quote?.rate_type || "", currency_rate_date: quote?.rate_date || "", currency_rate_fetched_at: quote?.fetched_at || "" });
+const manualRateFields = { currency_rate_mode: "manual", currency_rate_source: "manual", currency_rate_type: null, currency_rate_date: null, currency_rate_fetched_at: null };
+const istanbulDay = (value) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value));
+const isFreshQuote = (quote, ttl = 300000) => Boolean(quote && Number.isFinite(Date.parse(quote.fetched_at)) && Date.now() - Date.parse(quote.fetched_at) >= -60000 && Date.now() - Date.parse(quote.fetched_at) < ttl && istanbulDay(quote.fetched_at) === istanbulDay(Date.now()));
+const paymentRateFields = (quote, currency) => ({ payment_currency_rate: quote ? String(quote.rates[currency]) : "", payment_rate_mode: "automatic", payment_rate_source: "Harem", payment_rate_type: quote ? "Buying" : null, payment_rate_date: quote?.rate_date || null, payment_rate_fetched_at: quote?.fetched_at || null, payment_rate_quoted_at: quote?.rate_times?.[currency] || null });
+const manualPaymentFields = { payment_rate_mode: "manual", payment_rate_source: "manual", payment_rate_type: null, payment_rate_date: null, payment_rate_fetched_at: null, payment_rate_quoted_at: null };
 const accessoryUnit = (option, product) => {
   const basis = option.pricing_basis || option.calculation_type || "birim";
   const type = basis === "birim" ? product.calculation_type : basis;
@@ -55,10 +63,23 @@ export default function PosPage() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const [fxQuote, setFxQuote] = useState(null);
+  const [fxLoading, setFxLoading] = useState(true);
+  const [fxError, setFxError] = useState("");
+  const [fxRefresh, setFxRefresh] = useState(0);
+  const [fxSaved, setFxSaved] = useState(false);
+  const fxContext = useRef({ currency: "TRY", saved: false });
+  const [paymentQuote, setPaymentQuote] = useState(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
+  const [paymentRefresh, setPaymentRefresh] = useState(0);
+  const [paymentSaved, setPaymentSaved] = useState(false);
+  const paymentContext = useRef({ currency: "TRY", saved: false, pending: false });
   const [tab, setTab] = useState("products");
   const [cart, setCart] = useState([]);
   const [header, setHeader] = useState({ ...EMPTY_HEADER });
   const [discount, setDiscount] = useState("0");
+  const [recordedFee, setRecordedFee] = useState(0);
   const [selected, setSelected] = useState(null);
   const [measurement, setMeasurement] = useState(null);
   const [wizardStep, setWizardStep] = useState(1);
@@ -77,6 +98,39 @@ export default function PosPage() {
   const approved = savedSale?.status === "tamamlandi" || delivered;
   const cancelled = savedSale?.status === "iptal";
   const locked = approved || cancelled;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api.get("/exchange-rates", { signal: controller.signal }).then(({ data }) => {
+      if (controller.signal.aborted) return;
+      if (data.stale || data.source !== "TCMB" || data.rate_type !== "ForexSelling" || !/^\d{4}-\d{2}-\d{2}$/.test(data.rate_date) || !Number.isFinite(Date.parse(data.fetched_at)) || !["USD", "EUR"].every((code) => Number.isFinite(data.rates?.[code]) && data.rates[code] > 0)) throw new Error("Kur bilgisi doğrulanamadı. Yeniden deneyin veya elle kur girin.");
+      setFxQuote(data);
+      setFxError("");
+      setMeasurement((previous) => (!fxContext.current.saved || fxContext.current.pending) && ["USD", "EUR"].includes(fxContext.current.currency) && previous?.currency_rate_mode === "automatic" && !previous.currency_rate ? { ...previous, ...rateFields(data, fxContext.current.currency) } : previous);
+    }).catch((error) => {
+      if (controller.signal.aborted) return;
+      setFxQuote(null);
+      setFxError(error.response?.data?.message || error.message || "Günlük kur alınamadı.");
+    }).finally(() => { if (!controller.signal.aborted) setFxLoading(false); });
+    return () => controller.abort();
+  }, [fxRefresh]);
+
+  useEffect(() => {
+    if (!paymentRefresh) return;
+    const controller = new AbortController();
+    api.get("/exchange-rates", { signal: controller.signal, params: { provider: "harem" } }).then(({ data }) => {
+      if (controller.signal.aborted) return;
+      if (data.stale || data.source !== "Harem" || data.rate_type !== "Buying" || !/^\d{4}-\d{2}-\d{2}$/.test(data.rate_date) || !Number.isFinite(Date.parse(data.fetched_at)) || !["USD", "EUR"].every((code) => Number.isFinite(data.rates?.[code]) && data.rates[code] > 0 && Number.isFinite(Date.parse(data.rate_times?.[code])))) throw new Error("Harem alış kuru doğrulanamadı.");
+      setPaymentQuote(data);
+      setPaymentError("");
+      setHeader((previous) => (!paymentContext.current.saved || paymentContext.current.pending) && previous.payment_currency === paymentContext.current.currency && previous.payment_currency !== "TRY" && previous.payment_rate_mode === "automatic" && !previous.payment_currency_rate ? { ...previous, ...paymentRateFields(data, previous.payment_currency) } : previous);
+    }).catch((error) => {
+      if (controller.signal.aborted) return;
+      setPaymentQuote(null);
+      setPaymentError(error.response?.data?.message || error.message || "Harem alış kuru alınamadı.");
+    }).finally(() => { if (!controller.signal.aborted) setPaymentLoading(false); });
+    return () => controller.abort();
+  }, [paymentRefresh]);
 
   useEffect(() => {
     let active = true;
@@ -120,7 +174,10 @@ export default function PosPage() {
       idempotencyKey.current = sale.client_request_id || nextKey();
       setCart(restored.cart);
       setHeader(restored.header);
+      paymentContext.current = { currency: restored.header.payment_currency || "TRY", saved: true, pending: false };
+      setPaymentSaved(paymentContext.current.currency !== "TRY");
       setDiscount(String(restored.discount));
+      setRecordedFee(Number(sale.credit_card_fee) || 0);
       setExistingId(sale._id);
       setSavedSale(sale);
       setReviewed(false);
@@ -132,19 +189,65 @@ export default function PosPage() {
   }, [location.search, location.state, navigate]);
 
   const totals = useMemo(() => {
-    try { return { ...orderTotals(cart, discount), error: "" }; }
+    try { const calculated = orderTotals(cart, discount); return { ...calculated, total: roundMoney(calculated.total + recordedFee), error: "" }; }
     catch (error) { return { subtotal: cart.reduce((sum, line) => sum + line.item_total, 0), discountPercent: 0, discountAmount: 0, total: 0, error: error.message }; }
-  }, [cart, discount]);
+  }, [cart, discount, recordedFee]);
+  const paymentCalculation = useMemo(() => {
+    try { return { value: paymentConversion(totals.total, header), error: "" }; }
+    catch (error) { return { value: null, error: error.message }; }
+  }, [totals.total, header]);
   const calculation = useMemo(() => {
     if (!selected || !measurement) return null;
+    if (measurement.currency_rate_mode === "automatic" && !Number(measurement.currency_rate)) return { line: null, error: fxLoading ? "Günlük kur yükleniyor…" : "Otomatik kur alınamadı. Yeniden deneyin veya elle kur girin." };
     try { return { line: calculateCurtainLine(selected, measurement), error: "" }; }
     catch (error) { return { line: null, error: error.message }; }
-  }, [selected, measurement]);
+  }, [selected, measurement, fxLoading]);
   const rooms = [...new Set(cart.map((line) => line.room_name))];
   const roomOptions = [...new Set([...ROOM_PRESETS, ...rooms.filter((room) => typeof room === "string" && room.trim())])];
   const dirty = () => { setReviewed(false); setSavedSale(null); };
   const updateHeader = (key, value) => { if (locked) return; setHeader((previous) => ({ ...previous, [key]: value })); dirty(); };
   const updateMeasurement = (key, value) => setMeasurement((previous) => ({ ...previous, [key]: value }));
+  const refreshRates = () => { setFxLoading(true); setFxError(""); setFxRefresh((value) => value + 1); };
+  const applyAutomaticRate = () => {
+    if (locked || processing || fxLoading || !["USD", "EUR"].includes(fxContext.current.currency)) return;
+    setFxSaved(false);
+    fxContext.current.pending = true;
+    const quote = !fxError && isFreshQuote(fxQuote) ? fxQuote : null;
+    setMeasurement((previous) => ({ ...previous, ...rateFields(quote, fxContext.current.currency) }));
+    if (!quote) refreshRates();
+  };
+  const useManualRate = () => {
+    if (locked || processing) return;
+    setFxSaved(false);
+    fxContext.current.pending = false;
+    setMeasurement((previous) => ({ ...previous, ...manualRateFields }));
+  };
+  const refreshPaymentRates = () => { setPaymentLoading(true); setPaymentError(""); setPaymentRefresh((value) => value + 1); };
+  const selectPaymentCurrency = (currency) => {
+    if (locked || processing) return;
+    paymentContext.current = { currency, saved: false, pending: false };
+    setPaymentSaved(false);
+    const quote = !paymentLoading && !paymentError && isFreshQuote(paymentQuote, 30000) ? paymentQuote : null;
+    setHeader((previous) => ({ ...previous, payment_currency: currency, ...paymentRateFields(currency !== "TRY" ? quote : null, currency) }));
+    dirty();
+    if (currency !== "TRY" && !quote && !paymentLoading) refreshPaymentRates();
+  };
+  const applyPaymentRate = () => {
+    if (locked || processing || paymentLoading) return;
+    paymentContext.current.pending = true;
+    setPaymentSaved(false);
+    const quote = !paymentError && isFreshQuote(paymentQuote, 30000) ? paymentQuote : null;
+    setHeader((previous) => ({ ...previous, ...paymentRateFields(quote, previous.payment_currency) }));
+    dirty();
+    if (!quote) refreshPaymentRates();
+  };
+  const useManualPaymentRate = () => {
+    if (locked || processing) return;
+    paymentContext.current.pending = false;
+    setPaymentSaved(false);
+    setHeader((previous) => ({ ...previous, ...manualPaymentFields }));
+    dirty();
+  };
   const updateMechanicalPanel = (index, key, value) => setMeasurement((previous) => {
     const panels = previous.mechanical_panels.map((panel, panelIndex) => panelIndex === index ? { ...panel, [key]: value } : panel);
     return { ...previous, mechanical_panels: panels, ...(index === 0 && ["width", "height", "chain_direction"].includes(key) ? { [key]: value } : {}) };
@@ -158,28 +261,38 @@ export default function PosPage() {
   const updateFilter = (key, value) => setFilters((previous) => ({ ...previous, [key]: value, page: 1 }));
 
   const openProduct = (product) => {
-    if (locked) return;
+    if (locked || processing) return;
+    const productCurrency = product.currency || product.price_currency || "TRY";
+    fxContext.current = { currency: productCurrency, saved: false };
+    setFxSaved(false);
     setSelected(product);
     setEditId(null);
-    setMeasurement(builderForm(product, { ...defaultMeasurement(product), room_name: lastRoom.current }));
+    const quote = !fxLoading && !fxError && isFreshQuote(fxQuote) ? fxQuote : null;
+    setMeasurement(builderForm(product, { ...defaultMeasurement(product), room_name: lastRoom.current, ...(productCurrency !== "TRY" ? ["USD", "EUR"].includes(productCurrency) ? rateFields(quote, productCurrency) : manualRateFields : {}) }));
+    if (["USD", "EUR"].includes(productCurrency) && !quote && !fxLoading) refreshRates();
     setWizardStep(1);
   };
 
   const editLine = async (line) => {
-    if (locked) return;
+    if (locked || processing) return;
     try {
       const response = await api.get("/products", { params: { search: line.product_name, limit: 100 } });
-      const product = response.data.products?.find((item) => item._id === line.product_id);
-      if (!product) throw new Error("Ürün katalogda bulunamadı. Bu kalemi kaldırıp yeniden ürün seçebilirsiniz.");
+      const currentProduct = response.data.products?.find((item) => item._id === line.product_id);
+      if (!currentProduct) throw new Error("Ürün katalogda bulunamadı. Bu kalemi kaldırıp yeniden ürün seçebilirsiniz.");
+      const savedCurrency = line.original_currency || currentProduct.currency || currentProduct.price_currency || "TRY";
+      const savedPrice = Number.isFinite(line.original_unit_price) && line.original_unit_price >= 0 ? line.original_unit_price : savedCurrency === "TRY" && Number.isFinite(line.base_unit_price) ? line.base_unit_price : currentProduct.sale_price;
+      const product = { ...currentProduct, currency: savedCurrency, price_currency: savedCurrency, sale_price: savedPrice };
+      fxContext.current = { currency: line.original_currency || product.currency || product.price_currency || "TRY", saved: true };
+      setFxSaved(fxContext.current.currency !== "TRY");
       setSelected(product);
       setEditId(line.id);
-      setMeasurement(builderForm(product, { ...defaultMeasurement(product), case_mode: line.case_mode || "ayri", profile_width_cm: line.profile_width_cm ? String(line.profile_width_cm) : "", mechanical_panels: line.mechanical_panels || undefined, room_name: line.room_name, area: line.area, facade: line.facade, window_name: line.window_name, variant: line.variant, item_note: line.item_note, chain_direction: line.chain_direction || "", width: String(line.width), height: String(line.height), count: String(line.count || line.pieces || 1), order_mode: line.order_mode || "adet", pleat_id: PLEATS.find((option) => option.name === line.pleat_name)?.id || "sik", labor_price: String(line.labor_unit_price || 0), currency_rate: line.original_currency !== "TRY" ? String(line.currency_rate || "") : "", separate_right: Boolean(line.panels?.length > 1 && (line.panels[0].width !== line.panels[1].width || line.panels[0].height !== line.panels[1].height)), right_width: String(line.panels?.[1]?.width || line.width), right_height: String(line.panels?.[1]?.height || line.height), extra_indices: (product.extra_options || []).map((option, index) => line.accessories?.some((saved) => saved.name === option.option_name) ? index : -1).filter((index) => index >= 0) }));
+      setMeasurement(builderForm(product, { ...defaultMeasurement(product), case_mode: line.case_mode || "ayri", profile_width_cm: line.profile_width_cm ? String(line.profile_width_cm) : "", mechanical_panels: line.mechanical_panels || undefined, room_name: line.room_name, area: line.area, facade: line.facade, window_name: line.window_name, variant: line.variant, item_note: line.item_note, chain_direction: line.chain_direction || "", width: String(line.width), height: String(line.height), count: String(line.count || line.pieces || 1), order_mode: line.order_mode || "adet", pleat_id: PLEATS.find((option) => option.name === line.pleat_name)?.id || "sik", labor_price: String(line.labor_unit_price || 0), currency_rate: line.original_currency !== "TRY" ? String(line.currency_rate || "") : "", currency_rate_mode: line.currency_rate_mode || "manual", currency_rate_source: line.currency_rate_source || "manual", currency_rate_type: line.currency_rate_type || null, currency_rate_date: line.currency_rate_date || null, currency_rate_fetched_at: line.currency_rate_fetched_at || null, separate_right: Boolean(line.panels?.length > 1 && (line.panels[0].width !== line.panels[1].width || line.panels[0].height !== line.panels[1].height)), right_width: String(line.panels?.[1]?.width || line.width), right_height: String(line.panels?.[1]?.height || line.height), extra_indices: (product.extra_options || []).map((option, index) => line.accessories?.some((saved) => saved.name === option.option_name) ? index : -1).filter((index) => index >= 0) }));
       setWizardStep(1);
     } catch (error) { toast.error(error.message || "Ürün düzenlenemedi."); }
   };
 
   const addLine = () => {
-    if (locked) return;
+    if (locked || processing) return;
     if (!measurement.room_name.trim()) { toast.error("Oda / bölüm adını girin."); return; }
     if (!calculation?.line) { toast.error(calculation?.error || "Ölçüleri kontrol edin."); return; }
     const line = { ...calculation.line, id: editId || nextKey() };
@@ -196,6 +309,7 @@ export default function PosPage() {
     if (!header.delivery_date || !header.delivery_method) { toast.error("Teslim tarihi ve teslim şeklini seçin."); return false; }
     if (header.delivery_method === "montaj" && !header.customer_address.trim()) { toast.error("Montaj için adres girin."); return false; }
     if (totals.error) { toast.error(totals.error); return false; }
+    if (paymentCalculation.error) { toast.error(paymentCalculation.error); return false; }
     return true;
   };
 
@@ -203,7 +317,10 @@ export default function PosPage() {
     const restored = restoreSaleDraft(record);
     setCart(restored.cart);
     setHeader(restored.header);
+    paymentContext.current = { currency: restored.header.payment_currency || "TRY", saved: true, pending: false };
+    setPaymentSaved(paymentContext.current.currency !== "TRY");
     setDiscount(String(restored.discount));
+    setRecordedFee(Number(record.credit_card_fee) || 0);
     setExistingId(record._id);
     restoredId.current = record._id;
     setSavedSale(record);
@@ -216,14 +333,16 @@ export default function PosPage() {
     if (processingRef.current || locked || !validateHeader()) return;
     processingRef.current = true;
     setProcessing(true);
-    const payload = salePayload(cart, header, discount, status, idempotencyKey.current);
+    let submitted = false;
     try {
+      const payload = salePayload(cart, header, discount, status, idempotencyKey.current, recordedFee);
+      submitted = true;
       const response = existingId ? await api.put(`/sales/${existingId}`, payload) : await api.post("/sales", payload);
       if (!response.data?._id || response.data.status !== status) throw new Error("Sipariş kaydı doğrulanamadı. Tekrar göndermeden sipariş takibini kontrol edin.");
       acceptSavedSale(response.data, status);
     } catch (error) {
       let reconciled = false;
-      if (!error.response) {
+      if (submitted && !error.response) {
         try {
           const response = await api.get("/sales");
           const found = response.data.find((sale) => existingId ? sale._id === existingId && sale.status === status : sale.client_request_id === idempotencyKey.current && sale.status === status);
@@ -235,8 +354,9 @@ export default function PosPage() {
   };
 
   const newOrder = () => {
-    setCart([]); setHeader({ ...EMPTY_HEADER }); setDiscount("0"); setExistingId(null); setSavedSale(null); setReviewed(false); setSelected(null); setTab("products");
+    setCart([]); setHeader({ ...EMPTY_HEADER }); setDiscount("0"); setRecordedFee(0); setExistingId(null); setSavedSale(null); setReviewed(false); setSelected(null); setTab("products");
     restoredId.current = null; idempotencyKey.current = nextKey();
+    paymentContext.current = { currency: "TRY", saved: false, pending: false }; setPaymentSaved(false);
     navigate("/dashboard/pos", { replace: true, state: null });
   };
   const printOrder = (kind) => { if (!approved || cancelled) return; try { openCurtainPrint(savedSale, kind); } catch (error) { toast.error(error.message); } };
@@ -248,6 +368,11 @@ export default function PosPage() {
   return <div className="curtain-pos">
     <style>{POS_STYLE}</style>
     <header className="pos-brand"><img src="/sahinsoy-logo.svg" alt="Şahinsoy Perde ve Döşemelik logosu" /><div><h1>Şahinsoy POS</h1><p className="muted">Satış ve sipariş ekranı</p></div></header>
+    <aside className="notice" aria-label="Günlük döviz kurları">
+      <div className="row" style={{ justifyContent: "space-between" }}><strong>TCMB · Günlük döviz satış kuru</strong><button type="button" disabled={fxLoading || processing} onClick={refreshRates}>{fxLoading ? <Loader2 className="spin" size={16} /> : null}{fxError ? "Kuru yeniden dene" : "Kurları yenile"}</button></div>
+      <div role="status">{fxLoading ? <p className="muted">Günlük kur yükleniyor…</p> : fxQuote && <p>USD: <strong>{formatExchangeRate(fxQuote.rates.USD)} ₺</strong> · EUR: <strong>{formatExchangeRate(fxQuote.rates.EUR)} ₺</strong> · Kur tarihi: {formatRateDate(fxQuote.rate_date)}</p>}{fxError && <p className="error">{fxError} Dövizli üründe elle kur girebilir veya yeniden deneyebilirsiniz.</p>}</div>
+      <p className="muted">Günlük kurdur; gün içi anlık fiyat değildir. Kurları yenilemek siparişe eklenmiş ürünlerin tutarını değiştirmez.</p>
+    </aside>
     <div className="pos-tabs" role="tablist" aria-label="Satış adımları">
       <button role="tab" aria-selected={tab === "products"} onClick={() => setTab("products")}><Package size={19} />1 · Ürünler</button>
       <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}><ShoppingCart size={19} />2 · Sipariş özeti ({cart.length})</button>
@@ -274,6 +399,7 @@ export default function PosPage() {
             <h3>{line.product_name}{line.area ? ` · ${line.area}` : ""}</h3><p className="muted">{[line.brand_name, line.variant ? `Renk / VR: ${line.variant}` : "", line.pleat_name, line.facade, line.window_name].filter(Boolean).join(" · ")}</p>
             {hasMechanicalPanels(line) ? <MechanicalDetails line={line} /> : <>{line.chain_direction && <p>Zincir / ip yönü: <strong>{line.chain_direction}</strong></p>}{line.mode === "fon" ? <p>{line.count} {line.order_mode === "takim" ? "takım" : "adet"} · {line.pieces} kanat · {line.panels.map((panel) => `${panel.label}: ${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm`).join(" / ")}</p> : line.width || line.height ? <p>En {formatNumber(line.width)} cm · Boy {formatNumber(line.height)} cm{line.mode === "textile" ? ` · ${line.pieces} parça` : ""}</p> : null}</>}
             <p>{line.mode === "fon" || line.mode === "textile" ? "Giden kumaş" : "Miktar"}: <strong>{formatNumber(line.quantity)} {line.unit_label}</strong> × {formatMoney(line.base_unit_price)} = {formatMoney(line.material_total)}</p>
+            {line.original_currency && line.original_currency !== "TRY" && <p className="muted">Siparişte kayıtlı kur: 1 {line.original_currency} = {formatExchangeRate(line.currency_rate)} ₺{line.currency_rate_source === "TCMB" && line.currency_rate_date ? ` · TCMB / ${formatRateDate(line.currency_rate_date)}` : " · Elle girilen kur"}</p>}
             {hasBillingDimensions(line) && <p className="muted">Hesap ölçüsü: {formatNumber(line.billable_width)} × {formatNumber(line.billable_height)} cm</p>}
             {line.calc_type === "m2" && line.calculation_note && <p className="muted">{line.calculation_note}</p>}
             {line.labor_total > 0 && <p>İşçilik: {formatNumber(line.quantity)} m × {formatMoney(line.labor_unit_price)} = {formatMoney(line.labor_total)}</p>}
@@ -293,7 +419,22 @@ export default function PosPage() {
         </div><p className="choice-label">Teslim şekli</p><div className="row"><button className="chip" aria-pressed={header.delivery_method === "magaza"} onClick={() => updateHeader("delivery_method", "magaza")}>Mağaza teslimi</button><button className="chip" aria-pressed={header.delivery_method === "montaj"} onClick={() => updateHeader("delivery_method", "montaj")}>Montaj</button></div>
           <div className="fields divider"><NumberField label="İskonto oranı (%)" min={0} step="0.1" value={discount} onChange={(value) => { setDiscount(value); dirty(); }} /><Field label="Ödeme şekli"><select value={header.payment_method} onChange={(event) => updateHeader("payment_method", event.target.value)}><option>Nakit</option><option>Kredi Kartı</option><option>Havale / EFT</option></select></Field><Field label="Sipariş notu" full><textarea value={header.sale_note} maxLength={1000} onChange={(event) => updateHeader("sale_note", event.target.value)} placeholder="Müşteri / imalat için sipariş notu" /></Field></div>
         </fieldset>
-          <div className="price-box"><div className="total-row"><span>Ara toplam</span><strong>{formatMoney(totals.subtotal)}</strong></div><div className="total-row"><span>İskonto (%{totals.discountPercent})</span><strong>− {formatMoney(totals.discountAmount)}</strong></div><div className="total-row grand-total"><span>Ödenecek</span><span>{formatMoney(totals.total)}</span></div>{totals.error && <p className="error" role="alert">{totals.error}</p>}</div>
+          <div className="price-box"><div className="total-row"><span>Ara toplam</span><strong>{formatMoney(totals.subtotal)}</strong></div><div className="total-row"><span>İskonto (%{totals.discountPercent})</span><strong>− {formatMoney(totals.discountAmount)}</strong></div>{recordedFee > 0 && <div className="total-row"><span>Kayıtlı ödeme farkı</span><strong>{formatMoney(recordedFee)}</strong></div>}<div className="total-row grand-total"><span>Ödenecek</span><span>{formatMoney(totals.total)}</span></div>{totals.error && <p className="error" role="alert">{totals.error}</p>}</div>
+          <fieldset className="review-card" disabled={processing || locked}>
+            <h3>Döviz ödeme karşılığı</h3>
+            <Field label="Ödeme para birimi"><select value={header.payment_currency || "TRY"} onChange={(event) => selectPaymentCurrency(event.target.value)}><option value="TRY">Türk lirası · TRY</option><option value="EUR">Euro · EUR</option><option value="USD">ABD doları · USD</option></select></Field>
+            {header.payment_currency && header.payment_currency !== "TRY" && <>
+              <p className="choice-label">{paymentSaved ? "Siparişte kayıtlı ödeme kuru" : header.payment_rate_mode === "manual" ? "Elle girilen ödeme kuru" : "Harem · Döviz alış kuru"}</p>
+              <div className="row" role="group" aria-label="Ödeme kuru seçimi"><button type="button" className="chip" aria-pressed={!paymentSaved && header.payment_rate_mode === "automatic"} disabled={paymentLoading} onClick={applyPaymentRate}>{paymentSaved ? "Güncel ödeme kurunu uygula" : "Otomatik ödeme kuru"}</button><button type="button" className="chip" aria-pressed={!paymentSaved && header.payment_rate_mode === "manual"} onClick={useManualPaymentRate}>Ödeme kurunu elle gir</button><button type="button" disabled={paymentLoading} onClick={refreshPaymentRates}>{paymentLoading ? <Loader2 className="spin" size={16} /> : null}Ödeme kurunu yenile</button></div>
+              <Field label={`${header.payment_currency} / TL ödeme kuru`}><input type="number" inputMode="decimal" min="0.0001" step="any" value={header.payment_currency_rate || ""} readOnly={paymentSaved || header.payment_rate_mode === "automatic"} onChange={(event) => { setHeader((previous) => ({ ...previous, ...manualPaymentFields, payment_currency_rate: event.target.value })); dirty(); }} /></Field>
+              {header.payment_rate_source === "Harem" && header.payment_rate_quoted_at && <p className="muted">Harem · Alış · {new Date(header.payment_rate_quoted_at).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}</p>}
+              {paymentLoading && <p className="muted" role="status">Harem alış kuru yükleniyor…</p>}
+              {paymentError && <p className="error" role="alert">{paymentError} Yeniden deneyin veya ödeme kurunu elle girin.</p>}
+              {!paymentLoading && paymentCalculation.error && <p className="error">{paymentCalculation.error}</p>}
+              {paymentCalculation.value && <div className="price-box" aria-live="polite"><p>1 {paymentCalculation.value.currency} = {formatExchangeRate(paymentCalculation.value.rate)} ₺</p><p>{formatMoney(totals.total)} ÷ {formatExchangeRate(paymentCalculation.value.rate)}</p><p className="big">{formatMoney(paymentCalculation.value.amount, paymentCalculation.value.currency)}</p></div>}
+              <p className="muted">TL sipariş toplamı değişmez. Bu tutar döviz ödeme karşılığıdır; tahsilat kaydı oluşturmaz. Seçilen ödeme kuru kaydedilir, yenileme tutarı kendiliğinden değiştirmez.</p>
+            </>}
+          </fieldset>
         </section>
       </div>
       {reviewed && <div className="review-card" role="status"><strong>{header.first_name} {header.last_name}</strong> · İletişim: {header.customer_phone || "Belirtilmedi"} · Teslim: {header.delivery_date} · {header.delivery_method === "montaj" ? "Montaj" : "Mağaza teslimi"}<p>{cart.length} ürün kalemi / {rooms.length} oda · İskonto %{totals.discountPercent} ({formatMoney(totals.discountAmount)}) · Ödenecek {formatMoney(totals.total)}</p></div>}
@@ -323,7 +464,16 @@ export default function PosPage() {
           {!panelBuilderActive && <><NumberField label={mode === "fon" ? (measurement.order_mode === "takim" ? "Sol kanat eni (cm)" : "Kanat eni (cm)") : mode === "textile" ? "Toplam cephe / bitmiş en (cm)" : "En (cm)"} value={measurement.width} onChange={(value) => updateMeasurement("width", value)} min={selected.calculation_type === "adet" ? 0 : 1} />
           <NumberField label={mode === "fon" && measurement.order_mode === "takim" ? "Sol kanat boyu (cm)" : "Boy (cm)"} value={measurement.height} onChange={(value) => updateMeasurement("height", value)} min={selected.calculation_type === "m2" || mode === "fon" || mode === "textile" ? 1 : 0} /></>}
           {(mode === "textile" || mode === "fon") && <><Field label="Pile türü"><select value={measurement.pleat_id} onChange={(event) => updateMeasurement("pleat_id", event.target.value)}>{PLEATS.map((pleat) => <option key={pleat.id} value={pleat.id}>{pleat.name} · 1'e {pleat.factor}</option>)}</select></Field><NumberField label="Giden kumaşın metre işçiliği (₺ / m)" value={measurement.labor_price} onChange={(value) => updateMeasurement("labor_price", value)} /></>}
-          {currency !== "TRY" && <NumberField label={`${currency} / TL kuru`} value={measurement.currency_rate} onChange={(value) => updateMeasurement("currency_rate", value)} min={0.0001} />}
+          {currency !== "TRY" && <div className="full review-card">
+            <p><strong>{fxSaved ? "Siparişte kayıtlı kur" : "Döviz kuru seçimi"}</strong></p>
+            <div className="row" role="group" aria-label="Döviz kuru seçimi"><button type="button" className="chip" aria-pressed={!fxSaved && measurement.currency_rate_mode === "automatic"} disabled={locked || processing || fxLoading || !["USD", "EUR"].includes(currency)} onClick={applyAutomaticRate}>{fxSaved ? "Güncel kuru uygula" : "Otomatik kur"}</button><button type="button" className="chip" aria-pressed={!fxSaved && measurement.currency_rate_mode === "manual"} disabled={locked || processing} onClick={useManualRate}>Elle kur gir</button></div>
+            <Field label={`${currency} / TL kuru`}><input type="number" inputMode="decimal" step="any" min="0.0001" value={measurement.currency_rate} readOnly={fxSaved || measurement.currency_rate_mode === "automatic"} disabled={locked || processing} onChange={(event) => setMeasurement((previous) => ({ ...previous, ...manualRateFields, currency_rate: event.target.value }))} /></Field>
+            {measurement.currency_rate_source === "TCMB" && measurement.currency_rate_date && <p className="muted">TCMB · Döviz satış · {formatRateDate(measurement.currency_rate_date)}</p>}
+            {fxSaved && <p className="muted">Kaydedilmiş kur korunur. Yeni kuru kullanmak için Güncel kuru uygula düğmesine basın.</p>}
+            {!fxSaved && measurement.currency_rate_mode === "automatic" && !measurement.currency_rate && <p className={fxError ? "error" : "muted"}>{fxLoading ? "Günlük kur yükleniyor…" : "Otomatik kur kullanılamıyor. Kuru yeniden deneyin veya elle girin."}</p>}
+            {!fxSaved && measurement.currency_rate_mode === "automatic" && Boolean(measurement.currency_rate) && <p className="muted">Bu ürünün seçili kuru korunur. Güncellemek için Otomatik kur düğmesine basın.</p>}
+            {(fxError || !fxQuote) && <button type="button" disabled={fxLoading || locked || processing} onClick={refreshRates}>{fxLoading ? <Loader2 className="spin" size={16} /> : null}Kuru yeniden dene</button>}
+          </div>}
         </div>
         {panelBuilderActive && <fieldset className="divider" disabled={locked || processing}>
           <h3>Kasa ve parçalar</h3><div role="group" aria-label="Kasa seçimi" className="row" style={{ marginTop: 12 }}><button type="button" className="chip" aria-pressed={measurement.case_mode === "ayri"} onClick={() => updateMeasurement("case_mode", "ayri")}>Her parça ayrı kasada</button><button type="button" className="chip" aria-pressed={measurement.case_mode === "ortak"} onClick={() => updateMeasurement("case_mode", "ortak")}>Tüm parçalar tek kasada</button></div>
@@ -336,12 +486,12 @@ export default function PosPage() {
         {(mode === "textile" || mode === "fon") && <p className="muted">Her kanada / parçaya 40 cm dikiş payı eklenir. Boy ölçüsü sadece imalat içindir; fiyatı değiştirmez.</p>}
         {directionRequired && !panelBuilderActive && <div className="divider"><h3 className="choice-label">Zincir / ip yönü</h3><div role="group" aria-label="Zincir / ip yönü" className="row">{["Sağ", "Sol"].map((direction) => <button key={direction} type="button" className="chip" style={{ minWidth: 120 }} aria-pressed={measurement.chain_direction === direction} disabled={locked || processing} onClick={() => updateMeasurement("chain_direction", direction)}>{direction}</button>)}</div><p className="muted">Ürünün zincir / ip yönünü seçin.</p></div>}
         {selected.calculation_type === "m2" && <div className="notice" style={{ marginTop: 12 }}><strong>m² hesap kuralları</strong><p>Fiyat, en × boy ve adet üzerinden hesaplanır. İmalat için girdiğiniz ölçüler korunur.</p>{Number(selected.min_width_cm) > 0 && <p>Hesapta minimum en: {formatNumber(selected.min_width_cm)} cm</p>}{Number(selected.min_height_cm) > 0 && <p>Hesapta minimum boy: {formatNumber(selected.min_height_cm)} cm</p>}{Number(selected.dimension_rounding_cm) > 0 && <p>Hesapta en ve boy {formatNumber(selected.dimension_rounding_cm)} cm'lik adımlara yukarı yuvarlanır.</p>}{Number(selected.min_m2) > 0 && <p>Minimum miktar: {formatNumber(selected.min_m2)} m² / adet</p>}{Number(selected.rounding_step) > 0 && <p>m² miktarı {formatNumber(selected.rounding_step)} m² adımına yukarı yuvarlanır.</p>}</div>}
-        {currency !== "TRY" && <p className="muted">Fiyat {formatMoney(selected.sale_price, currency)} / birim. Bu sipariş için girilen kur kaydedilir.</p>}
+        {currency !== "TRY" && <p className="muted">Fiyat {formatMoney(selected.sale_price, currency)} / birim. Seçilen kur bu ürün kalemine kaydedilir; sonraki kur yenilemeleri bu tutarı değiştirmez.</p>}
         {Boolean(selected.extra_options?.length) && <div className="divider"><h3>Aksesuar / etek / kasa seçenekleri</h3>{selected.extra_options.map((option, index) => <label className="accessory" key={option._id || index}><input type="checkbox" checked={measurement.extra_indices.includes(index)} onChange={(event) => updateMeasurement("extra_indices", event.target.checked ? [...measurement.extra_indices, index] : measurement.extra_indices.filter((item) => item !== index))} /><span>{option.option_name}<span className="muted"> · {isPercentageOption(option) ? `%${formatRate(option.price_impact)}` : `${formatMoney(option.price_impact, option.currency || currency)} / ${accessoryUnit(option, selected)}`}</span></span></label>)}</div>}
         {selected.extra_options?.some((option) => option.pricing_basis === "mt" || option.calculation_type === "mt") && <p className="muted">Metreli aksesuarlar gerçek en üzerinden hesaplanır.</p>}
         <Field label="Ürün / imalat notu" full><textarea maxLength={500} value={measurement.item_note} onChange={(event) => updateMeasurement("item_note", event.target.value)} placeholder="Örn. etek modeli, kasa rengi…" /></Field>
         <div className="price-box" aria-live="polite">{calculation?.line ? <><MechanicalDetails line={calculation.line} /><p>{mode === "fon" || mode === "textile" ? "Giden kumaş" : "Hesaplanan miktar"}: <strong>{formatNumber(calculation.line.quantity)} {calculation.line.unit_label}</strong>{mode === "fon" ? ` · ${calculation.line.pieces} kanat` : ""}</p>{hasBillingDimensions(calculation.line) && <p>Hesap ölçüsü: {formatNumber(calculation.line.billable_width)} × {formatNumber(calculation.line.billable_height)} cm</p>}<p>{formatNumber(calculation.line.quantity)} {calculation.line.unit_label} × {formatMoney(calculation.line.base_unit_price)} = {formatMoney(calculation.line.material_total)}</p>{calculation.line.labor_total > 0 && <p>İşçilik: {formatNumber(calculation.line.quantity)} m × {formatMoney(calculation.line.labor_unit_price)} = {formatMoney(calculation.line.labor_total)}</p>}{calculation.line.accessories_total > 0 && <p>Aksesuarlar: {formatMoney(calculation.line.accessories_total)}</p>}<p className="muted">{calculation.line.calculation_note}</p><p className="big">{formatMoney(calculation.line.item_total)}</p></> : <p className="error">{calculation?.error}</p>}</div>
-        <div className="actions"><button onClick={() => setWizardStep(1)}><ArrowLeft size={18} />Geri</button><button className="primary" disabled={!calculation?.line} onClick={addLine}><Plus size={18} />{editId ? "Değişiklikleri kaydet" : "Siparişe ekle"}</button></div>
+        <div className="actions"><button onClick={() => setWizardStep(1)}><ArrowLeft size={18} />Geri</button><button className="primary" disabled={!calculation?.line || locked || processing} onClick={addLine}><Plus size={18} />{editId ? "Değişiklikleri kaydet" : "Siparişe ekle"}</button></div>
       </>}
     </section></div>}
   </div>;
