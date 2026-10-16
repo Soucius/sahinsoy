@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import api from '../libs/axios';
-import { openCurtainPrint } from '../libs/curtainPrint';
-import { buildMeasurementRevision, measurementFormForLine } from '../../../backend/src/libs/orderMeasurement.js';
+import { hasManufacturingItems, openCurtainPrint } from '../libs/curtainPrint';
+import { buildMeasurementRevision, changeMeasurementForms, measurementFormForLine } from '../../../backend/src/libs/orderMeasurement.js';
 const money = value => Number(value || 0).toLocaleString('tr-TR', {
   style: 'currency',
   currency: 'TRY'
@@ -51,6 +51,10 @@ function dims(line) {
   }
   return `${number(line.width)} × ${number(line.height)} cm`;
 }
+function dualDetails(line) {
+  const dual = line.dual_plise;
+  return dual ? `Çiftli plise · ${dual.glass_label} · ${dual.role === 'tul' ? 'Tül' : 'Güneşlik'} · Kasa rengi: ${dual.case_color || 'Seçilmedi'}` : '';
+}
 function actorLabel(actor) {
   if (!actor) return 'Belirtilmedi';
   if (typeof actor === 'string') return `Kullanıcı #${actor.slice(-8).toUpperCase()}`;
@@ -76,6 +80,7 @@ function MeasurementLine({
 }) {
   const location = [line.room_name, line.area, line.facade, line.window_name].filter(Boolean).join(' · ');
   const team = line.mode === 'fon' && line.order_mode === 'takim';
+  const dual = line.dual_plise;
   return <article className={card}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
@@ -86,6 +91,7 @@ function MeasurementLine({
         <p className="mt-1 text-sm text-[#6f5843]">Kayıtlı ölçü: {dims(line)}</p>
       </div>
     </div>
+    {dual && <p className="mt-4 rounded-xl border border-[#c8ad8c] bg-[#eee1d0] px-4 py-3 font-semibold">{dualDetails(line)}. Cam eni iki kumaşta birlikte güncellenir; boy yalnız bu kumaşa aittir.</p>}
     <p className="my-4 rounded-xl bg-[#f4ecdf] px-4 py-3 text-[#593d29]">{team ? `${number(line.count)} takım · ${number(line.pieces)} kanat` : `${number(line.pieces || line.count)} ${line.mode === 'textile' ? 'parça' : line.mode === 'fon' ? 'kanat' : 'adet'}`} · Ürün {money(line.base_unit_price)} / {line.unit_label}{line.labor_unit_price ? ` · İşçilik ${money(line.labor_unit_price)} / m` : ''}. Birim fiyatlar korunur.</p>
     {form.mechanical_panels?.length ? <div className="space-y-4">
       <p className="font-semibold">{line.case_mode === 'ortak' ? 'Ortak kasa' : 'Ayrı kasalar'} · {line.mechanical_panels.length} parça</p>
@@ -101,7 +107,7 @@ function MeasurementLine({
         <span className="mt-2 block text-sm font-normal text-[#6f5843]">İmalat içindir. Kasa farkı parçaların gerçek enleri toplamıyla hesaplanır.</span>
       </label>}
     </div> : <>
-      <DimensionInputs value={form} widthLabel={team ? 'Sol kanat eni (cm)' : line.mode === 'textile' ? 'Toplam en (cm)' : 'En (cm)'} heightLabel={team ? 'Sol kanat boyu (cm)' : 'Boy (cm)'} onChange={onChange} />
+      <DimensionInputs value={form} widthLabel={dual ? 'Ortak cam eni (cm)' : team ? 'Sol kanat eni (cm)' : line.mode === 'textile' ? 'Toplam en (cm)' : 'En (cm)'} heightLabel={dual ? `${dual.role === 'tul' ? 'Tül' : 'Güneşlik'} boyu (cm)` : team ? 'Sol kanat boyu (cm)' : 'Boy (cm)'} onChange={onChange} />
       {team && <div className="mt-4">
         <DimensionInputs value={{
           width: form.right_width,
@@ -128,6 +134,7 @@ function RevisionHistory({
             const before = entry.before?.pos_details?.cart?.[position];
             return <div key={line.id || position} className="rounded-lg bg-[#f4ecdf] p-3">
               <strong>{line.product_name}</strong>
+              {line.dual_plise && <p className="mt-1 font-semibold">{dualDetails(line)}</p>}
               <p className="mt-1">Önce: {before ? dims(before) : 'Kayıt bulunmuyor'}</p>
               <p>Sonra: {dims(line)}</p>
               <p>{number(before?.quantity)} → {number(line.quantity)} {line.unit_label} · {money(before?.item_total)} → {money(line.item_total)}</p>
@@ -241,10 +248,7 @@ export default function SaleMeasurementPage() {
   const locked = busy || conflict || Boolean(unknownRequest) || !editable(sale);
   const changeLine = (index, key, value) => {
     if (locked || review) return;
-    setMeasurements(previous => previous.map((form, position) => position === index ? {
-      ...form,
-      [key]: value
-    } : form));
+    setMeasurements(previous => changeMeasurementForms(sale.pos_details.cart, previous, index, key, value));
     requestRef.current = null;
   };
   const reload = async () => {
@@ -513,6 +517,7 @@ export default function SaleMeasurementPage() {
           const original = sale.pos_details.cart[index];
           return <article key={line.id || index} className="rounded-xl bg-[#f4ecdf] p-4">
             <h3 className="font-bold">{line.product_name}</h3>
+            {line.dual_plise && <p className="mt-1 font-semibold">{dualDetails(line)}</p>}
             <p className="mt-2">Önce: {dims(original)}</p>
             <p>Yeni: {dims(line)}</p>
             <p className="mt-2 font-semibold">{number(original.quantity)} → {number(line.quantity)} {line.unit_label} · {money(original.item_total)} → {money(line.item_total)}</p>
@@ -530,7 +535,7 @@ export default function SaleMeasurementPage() {
       <p className="mt-2 text-[#6f5843]">Revizyon {revisionOf(sale)} · {statusLabel(sale.measurement_status)}. PDF’ler kayıtlı ölçüleri kullanır.{geometryChanged || metadataChanged ? ' Buradaki kaydedilmemiş değişiklikler PDF’ye yansımaz.' : ''}</p>
       <div className="mt-4 flex flex-wrap gap-3">
         <button className={secondary} disabled={busy || geometryChanged || metadataChanged || Boolean(unknownRequest) || conflict} onClick={() => print('customer')}>Müşteri sipariş kağıdı / PDF</button>
-        <button className={secondary} disabled={busy || geometryChanged || metadataChanged || Boolean(unknownRequest) || conflict} onClick={() => print('manufacturing')}>İmalat planı / PDF</button>
+        {hasManufacturingItems(sale.pos_details?.cart) && <button className={secondary} disabled={busy || geometryChanged || metadataChanged || Boolean(unknownRequest) || conflict} onClick={() => print('manufacturing')}>İmalat planı / PDF</button>}
       </div>
     </section>}
 
