@@ -31,6 +31,21 @@ function sale(cart, discount = 0) {
 
 const revise = (saved, edits = {}, products = []) => buildMeasurementRevision(saved, { measurements: saved.pos_details.cart.map((item) => ({ ...measurementFormForLine(item), ...(edits[item.id] || {}) })) }, products);
 
+test("ölçü revizyonu katalog kuru değişse de kaydedilmiş TCMB kuru ve kaynağını korur", () => {
+  const product = { ...stor, currency: "USD", sale_price: 25, stock_tracking: false };
+  const rate = { currency_rate: "40", currency_rate_mode: "automatic", currency_rate_source: "TCMB", currency_rate_type: "ForexSelling", currency_rate_date: "2026-10-09", currency_rate_fetched_at: "2026-10-09T13:00:00.000Z" };
+  const saved = sale([line(product, { ...rate, width: "155", height: "250", chain_direction: "Sağ" })]);
+  const updatedCatalogue = { ...product, sale_price: 999, currency_rate: 90 };
+  const updated = revise(saved, { "line-1": { width: "165" } }, [updatedCatalogue]).pos_details.cart[0];
+  assert.equal(updated.quantity, 4.25);
+  assert.equal(updated.base_unit_price, 1000);
+  assert.equal(updated.item_total, 4250);
+  assert.equal(updated.original_unit_price, 25);
+  assert.equal(updated.currency_rate, 40);
+  for (const [key, value] of Object.entries(rate).filter(([key]) => key !== "currency_rate")) assert.equal(updated[key], value);
+  assert.equal(saved.pos_details.cart[0].quantity, 4);
+});
+
 test("400 → 420 cm recalculates 12.80 → 13.40 m at saved product/labor prices and the same discount/fee", () => {
   const saved = sale([line(textile, { count: "2" })], 10);
   saved.credit_card_fee = 25;
