@@ -6,7 +6,7 @@ export function supportsMeasurementBatch(product) {
 }
 
 export function createMeasurementRow(values = {}) {
-  return { width: String(values.width ?? ""), height: String(values.height ?? ""), count: String(values.count ?? "1"), label: String(values.label ?? ""), variant: String(values.variant ?? ""), case_color: String(values.case_color ?? "") };
+  return { width: String(values.width ?? ""), height: String(values.height ?? ""), count: String(values.count ?? "1"), label: String(values.label ?? ""), variant: String(values.variant ?? ""), case_color: String(values.case_color ?? ""), secondary_height: String(values.secondary_height ?? ""), secondary_variant: String(values.secondary_variant ?? "") };
 }
 
 export function getCaseColorOptions(product) {
