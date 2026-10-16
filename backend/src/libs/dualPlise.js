@@ -68,6 +68,8 @@ function validateLinePrice(line) {
 
 /**
  * Each row is one physical glass, represented by two ordinary priced fabric lines.
+ * New shared-measurement rows use one height for both fabrics; unflagged saved
+ * orders retain their earlier independent-height behavior.
  * The entire batch is calculated before allocating identities, so an invalid final
  * row cannot leave a partly created list for the caller to add to the order.
  */
@@ -99,7 +101,7 @@ export function calculateDualPliseBatch(tulProduct, shadeProduct, common = {}, r
         extra_indices: [], case_mode: "ayri", mechanical_panels: [], labor_price: 0,
       });
       const tul = makeLine(tulProduct, row.height, variant);
-      const guneslik = makeLine(shadeProduct, row.shade_height, shadeVariant);
+      const guneslik = makeLine(shadeProduct, common.shared_measurements === true ? row.height : row.shade_height, shadeVariant);
       for (const line of [tul, guneslik]) validateLinePrice(line);
       if (!Number.isSafeInteger(tul.pieces) || tul.pieces < 1) throw new Error("Cam adedi hesaplama sınırını aşıyor.");
       return { glass_label: glassLabel, case_color: caseColor, width: tul.width, count: tul.count, tul, guneslik };
@@ -118,7 +120,8 @@ export function calculateDualPliseBatch(tulProduct, shadeProduct, common = {}, r
   };
   const groups = calculated.map((group) => {
     const groupId = nextKey();
-    const metadata = { version: 1, group_id: groupId, glass_label: group.glass_label, case_color: group.case_color };
+    const metadata = { version: 1, group_id: groupId, glass_label: group.glass_label, case_color: group.case_color,
+      ...(common.shared_measurements === true ? { shared_measurements: true } : {}) };
     const tul = { ...group.tul, id: nextKey(), dual_plise: { ...metadata, role: "tul" } };
     const guneslik = { ...group.guneslik, id: nextKey(), dual_plise: { ...metadata, role: "guneslik" } };
     return { ...group, group_id: groupId, tul, guneslik, quantity: roundQuantity(tul.quantity + guneslik.quantity), total: roundMoney(tul.item_total + guneslik.item_total), pieces: group.count };
@@ -141,7 +144,8 @@ export function validateDualPliseGroups(cart) {
     const metadata = line.dual_plise;
     if (!object(metadata) || metadata.version !== 1 || typeof metadata.group_id !== "string" || !text(metadata.group_id) || metadata.group_id.length > 150
       || !["tul", "guneslik"].includes(metadata.role) || typeof metadata.glass_label !== "string" || !text(metadata.glass_label) || metadata.glass_label.length > 100
-      || typeof metadata.case_color !== "string" || metadata.case_color.length > 150 || !id || id.length > 150
+      || typeof metadata.case_color !== "string" || metadata.case_color.length > 150
+      || (own(metadata, "shared_measurements") && typeof metadata.shared_measurements !== "boolean") || !id || id.length > 150
       || !recordId(line.product_id) || dualPliseRole(line) !== metadata.role
       || !finitePositive(line.width) || !finitePositive(line.height) || !Number.isSafeInteger(line.count) || line.count < 1 || line.pieces !== line.count) {
       throw new Error("Çiftli plisenin eşleştirme ve cam ölçüsü bilgileri eksik veya geçersiz.");
@@ -156,7 +160,9 @@ export function validateDualPliseGroups(cart) {
     const sameFields = ["width", "count", "pieces", "room_name", "area", "facade", "window_name"];
     if (recordId(a.product_id) === recordId(b.product_id) || a.id === b.id || lineIds.get(recordId(a.id)) !== 1 || lineIds.get(recordId(b.id)) !== 1
       || sameFields.some((field) => a[field] !== b[field])
-      || a.dual_plise.glass_label !== b.dual_plise.glass_label || a.dual_plise.case_color !== b.dual_plise.case_color) {
+      || a.dual_plise.glass_label !== b.dual_plise.glass_label || a.dual_plise.case_color !== b.dual_plise.case_color
+      || a.dual_plise.shared_measurements !== b.dual_plise.shared_measurements
+      || (a.dual_plise.shared_measurements === true && a.height !== b.height)) {
       throw new Error("Çiftli plisenin iki kumaşı aynı cam, en, adet ve kasa rengine ait olmalıdır.");
     }
   }
