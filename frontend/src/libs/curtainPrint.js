@@ -1,4 +1,4 @@
-import { formatMoney, formatNumber, mechanicalPanelPosition, orderTotals, paymentConversion, restoreSaleDraft, showFabricSpecs } from "./curtainCalculation.js";
+import { formatMoney, formatNumber, mechanicalPanelPosition, orderTotals, paymentConversion, productMode, restoreSaleDraft, showFabricSpecs } from "./curtainCalculation.js";
 
 export function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
@@ -9,9 +9,58 @@ const number = (value, decimals = 2) => safe(formatNumber(value, decimals));
 const money = (value) => safe(formatMoney(value));
 const date = (value) => value ? safe(new Date(value).toLocaleDateString("tr-TR")) : "—";
 const fabricLine = (line) => line.mode === "fon" || line.mode === "textile";
+function manufacturingMode(line) {
+  if (!line || typeof line !== "object") return null;
+  if (fabricLine(line)) return line.mode;
+  if (line.mode && line.mode !== "standard") return null;
+  const mode = productMode({ ...line, calculation_type: line.calc_type || line.calculation_type });
+  return mode === "textile" || mode === "fon" ? mode : null;
+}
+
+function manufacturingItems(cart) {
+  return Array.isArray(cart) ? cart.flatMap((line) => {
+    const mode = manufacturingMode(line);
+    return mode ? [{ ...line, mode }] : [];
+  }) : [];
+}
+
+export function hasManufacturingItems(cart) {
+  return Array.isArray(cart) && cart.some((line) => Boolean(manufacturingMode(line)));
+}
+
 const mechanicalParts = (line) => Array.isArray(line.mechanical_panels) && line.mechanical_panels.length ? line.mechanical_panels : null;
 const percentageOption = (option) => option.pricing_basis === "yuzde" || option.unit === "%";
 const rate = (value) => safe(Number(value || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 }));
+
+function dualPliseGroups(cart) {
+  const candidates = new Map();
+  cart.forEach((line, index) => {
+    const metadata = line?.dual_plise;
+    if (!metadata || metadata.version !== 1 || typeof metadata.group_id !== "string" || !metadata.group_id.trim() || !["tul", "guneslik"].includes(metadata.role)) return;
+    const members = candidates.get(metadata.group_id) || [];
+    members.push({ index, line, metadata });
+    candidates.set(metadata.group_id, members);
+  });
+  const groups = new Map();
+  let ordinal = 0;
+  for (const members of candidates.values()) {
+    if (members.length !== 2 || members[0].metadata.role === members[1].metadata.role) continue;
+    const [first, second] = members;
+    if (["room_name", "area", "facade", "window_name", "width", "count"].some((key) => first.line[key] !== second.line[key]) || ["glass_label", "case_color"].some((key) => first.metadata[key] !== second.metadata[key]) || !members.every(({ line }) => Number.isFinite(line.item_total))) continue;
+    const total = members.reduce((sum, { line }) => sum + line.item_total, 0);
+    if (!Number.isFinite(total)) continue;
+    const number = ++ordinal;
+    for (const member of members) groups.set(member.index, { ...member.metadata, number, total, last: member.index === second.index });
+  }
+  return groups;
+}
+
+const dualPliseRole = (dual) => dual.role === "tul" ? "Tül" : "Güneşlik";
+const dualPliseDescription = (dual) => `Çiftli plise ${dual.number} · ${dualPliseRole(dual)}`;
+
+function dualPliseDetails(dual) {
+  return `${dual.glass_label ? `Cam: ${safe(dual.glass_label)}` : ""}${dual.case_color ? `${dual.glass_label ? " · " : ""}Kasa rengi: ${safe(dual.case_color)}` : ""}`;
+}
 
 function billingDetail(line) {
   if (line.calc_type !== "m2") return "";
@@ -39,8 +88,6 @@ function manufacturingFooter(cart) {
     parts.push(`Toplam giden kumaş: ${number(fabrics.reduce((sum, line) => sum + line.quantity, 0))} m.`);
     parts.push("Tül ve fon ürünlerinde boy ölçüsü imalat içindir. Dikiş payı her kanatta / parçada 40 cm olarak hesaba dahildir.");
   }
-  if (cart.some((line) => line.mode === "mechanical")) parts.push("Mekanik ürünlerde kutulardaki en ve boy imalat ölçüsüdür.");
-  if (cart.some((line) => mechanicalParts(line) && line.case_mode === "ortak")) parts.push("Aynı ORTAK KASA numarasını taşıyan parçalar aynı kasaya aittir.");
   return parts.join(" ");
 }
 
@@ -76,14 +123,16 @@ function controlDirection(line) {
 export function createCustomerOrderHtml(sale, logoUrl = "/sahinsoy-logo.svg") {
   const { cart, header, discount } = restoreSaleDraft(sale);
   const totals = orderTotals(cart, discount);
+  const dualGroups = dualPliseGroups(cart);
   const conversion = paymentConversion(sale.grand_total ?? totals.total, header);
   const paymentDetail = conversion.currency === "TRY" ? "" : `<section class="meta"><h2>Döviz ödeme karşılığı</h2><p><strong>${safe(formatMoney(conversion.amount, conversion.currency))}</strong> · TL toplamı: ${money(conversion.total_tl)}</p><p>1 ${safe(conversion.currency)} = ${number(conversion.rate, 4)} TL · ${conversion.rate_source === "Harem" ? "Harem alış kuru" : "Elle girilen ödeme kuru"}</p>${conversion.rate_source === "Harem" ? `<p>Kur zamanı: ${safe(new Date(conversion.quoted_at).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" }))}</p>` : ""}<p class="detail">Döviz karşılığı, bu belgede belirtilen kurla hesaplanmıştır. Tahsilat makbuzu değildir.</p></section>`;
-  const rows = cart.map((line) => {
+  const rows = cart.map((line, lineIndex) => {
+    const dual = dualGroups.get(lineIndex);
     const parts = mechanicalParts(line);
     const dimensions = parts ? "" : line.panels?.length ? line.panels.map((panel) => `${safe(panel.label)}: ${number(panel.width)} × ${number(panel.height)} cm`).join(" · ") : (line.width || line.height ? `${number(line.width)} × ${number(line.height)} cm` : "");
     const quantityLabel = parts ? caseDescription(line) : line.mode === "fon" ? `${number(line.count)} ${line.order_mode === "takim" ? "takım" : "adet"} (${number(line.pieces)} kanat)` : line.mode === "textile" ? `${number(line.pieces)} parça` : `${number(line.pieces)} adet`;
     const extras = (line.accessories || []).map((option) => `<div class="detail">${safe(option.name)}: ${percentageOption(option) ? `%${rate(option.quantity)} → ${money(option.total)}` : `${number(option.quantity)} ${safe(option.unit)} × ${money(option.unit_price)} = ${money(option.total)}`}</div>`).join("");
-    return `<tr><td><strong>${safe(line.product_name)}</strong><div class="detail">${safe(line.brand_name)}${line.variant ? ` · Renk / VR: ${safe(line.variant)}` : ""}</div>${controlDirection(line)}${showFabricSpecs(line) && (line.fabric_width_cm || line.grammage_gr) ? `<div class="detail">${line.fabric_width_cm ? `Kumaş eni ${number(line.fabric_width_cm)} cm` : ""}${line.grammage_gr ? ` · Gramaj ${number(line.grammage_gr)} g` : ""}</div>` : ""}<div class="detail">${lineLocation(line)}</div><div class="detail">${dimensions ? `Ölçü: ${dimensions} · ` : ""}${quantityLabel}${line.pleat_name ? ` · ${safe(line.pleat_name)}` : ""}</div>${parts ? parts.map((panel) => mechanicalPartDetails(panel, line, true)).join("") : ""}${billingDetail(line)}${line.item_note ? `<div class="detail">Not: ${safe(line.item_note)}</div>` : ""}${extras}</td><td class="right">${number(line.quantity)} ${safe(line.unit_label)}<div class="detail">${fabricLine(line) ? "Giden kumaş" : "Hesaplanan miktar"}</div></td><td class="right">${money(line.base_unit_price)}<div class="detail">${money(line.material_total)} ürün</div>${line.labor_total ? `<div class="detail">${number(line.quantity)} m × ${money(line.labor_unit_price)} işçilik<br>${money(line.labor_total)}</div>` : ""}</td><td class="right"><strong>${money(line.item_total)}</strong></td></tr>`;
+    return `<tr><td>${dual ? `<div class="detail"><strong>${safe(dualPliseDescription(dual))}</strong></div><div class="detail">${dualPliseDetails(dual)}</div>` : ""}<strong>${safe(line.product_name)}</strong><div class="detail">${safe(line.brand_name)}${line.variant ? ` · Renk / VR: ${safe(line.variant)}` : ""}</div>${controlDirection(line)}${showFabricSpecs(line) && (line.fabric_width_cm || line.grammage_gr) ? `<div class="detail">${line.fabric_width_cm ? `Kumaş eni ${number(line.fabric_width_cm)} cm` : ""}${line.grammage_gr ? ` · Gramaj ${number(line.grammage_gr)} g` : ""}</div>` : ""}<div class="detail">${lineLocation(line)}</div><div class="detail">${dimensions ? `Ölçü: ${dimensions} · ` : ""}${quantityLabel}${line.pleat_name ? ` · ${safe(line.pleat_name)}` : ""}</div>${parts ? parts.map((panel) => mechanicalPartDetails(panel, line, true)).join("") : ""}${billingDetail(line)}${line.item_note ? `<div class="detail">Not: ${safe(line.item_note)}</div>` : ""}${extras}</td><td class="right">${number(line.quantity)} ${safe(line.unit_label)}<div class="detail">${fabricLine(line) ? "Giden kumaş" : "Hesaplanan miktar"}</div></td><td class="right">${money(line.base_unit_price)}<div class="detail">${money(line.material_total)} ürün</div>${line.labor_total ? `<div class="detail">${number(line.quantity)} m × ${money(line.labor_unit_price)} işçilik<br>${money(line.labor_total)}</div>` : ""}</td><td class="right"><strong>${money(line.item_total)}</strong></td></tr>${dual?.last ? `<tr class="dual-plise-total"><td colspan="3"><strong>Çiftli plise ${dual.number} toplamı</strong><div class="detail">Tül + güneşlik · Yukarıdaki iki kalemin toplamıdır.</div></td><td class="right"><strong>${money(dual.total)}</strong></td></tr>` : ""}`;
   }).join("");
   const content = `<main class="sheet">${heading(sale.status === "beklemede" ? "Teklif / Sipariş Kağıdı" : "Sipariş Kağıdı", sale)}${customerMeta(sale, header)}<table><thead><tr><th>Ürün ve ölçüler</th><th class="right">Miktar</th><th class="right">Birim fiyat / işçilik</th><th class="right">Tutar</th></tr></thead><tbody>${rows}</tbody></table><div class="totals"><p><span>Ara toplam</span><strong>${money(sale.sub_total ?? totals.subtotal)}</strong></p><p><span>İskonto (%${number(discount)})</span><strong>− ${money(sale.discount_amount ?? totals.discountAmount)}</strong></p><p class="net"><span>Ödenecek</span><span>${money(sale.grand_total ?? totals.total)}</span></p></div>${paymentDetail}<p>Ödeme şekli: ${safe(sale.payment_method || header.payment_method || "Nakit")}</p>${sale.sale_note || header.sale_note ? `<p class="notes"><strong>Sipariş notu:</strong> ${safe(sale.sale_note || header.sale_note)}</p>` : ""}<div class="footer">${sale.status === "teslim_edildi" ? "Sipariş teslim edildi." : sale.status === "tamamlandi" ? "Sipariş onaylandı." : "Teklif beklemede."} · Ölçüler santimetre cinsindedir. Bu belge sipariş bilgilendirme kağıdıdır.</div></main>`;
   return documentShell("Şahinsoy · Sipariş Kağıdı", content, logoUrl);
@@ -96,32 +145,15 @@ function curtainSketch(fon, panel, textile = true) {
 
 export function manufacturingBoxes(cart) {
   const boxes = [];
-  let nextCaseNumber = 1;
-  for (const line of cart) {
-    const parts = mechanicalParts(line);
-    if (parts) {
-      const repeats = Number(line.count) || 1;
-      for (let repeat = 0; repeat < repeats; repeat++) {
-        if (line.case_mode === "ortak") {
-          const caseNumber = nextCaseNumber++;
-          for (let index = 0; index < parts.length; index++) {
-            const panel = parts[index];
-            boxes.push({ line, sequence: caseNumber, case_id: `ORTAK KASA ${caseNumber}`, quantity: Number.isFinite(panel.billable_area) ? panel.billable_area : line.quantity / (repeats * parts.length), panels: [panel], position: panel.position || mechanicalPanelPosition(index, parts.length), part_index: index + 1, part_count: parts.length, mechanical_case: true, case_mode: "ortak", case_width: line.case_width, profile_width_cm: Number(line.profile_width_cm) || 0, group: repeat + 1 });
-          }
-        } else {
-          for (let index = 0; index < parts.length; index++) {
-            const panel = parts[index];
-            const caseNumber = nextCaseNumber++;
-            boxes.push({ line, sequence: caseNumber, case_id: `KASA ${caseNumber}`, quantity: Number.isFinite(panel.billable_area) ? panel.billable_area : line.quantity / (repeats * parts.length), panels: [panel], position: panel.position || mechanicalPanelPosition(index, parts.length), part_index: index + 1, part_count: parts.length, mechanical_case: true, case_mode: "ayri", case_width: panel.width, group: repeat + 1 });
-          }
-        }
-      }
-    } else if (line.mode === "fon") {
-      for (let index = 0; index < line.count; index++) boxes.push({ line, sequence: index + 1, quantity: line.panels.reduce((sum, panel) => sum + panel.cut_width / 100, 0), panels: line.panels });
-    } else if (line.mode === "textile") {
-      for (let index = 0; index < line.pieces; index++) boxes.push({ line, sequence: index + 1, quantity: line.quantity / line.pieces, panels: line.panels });
+  for (const line of manufacturingItems(cart)) {
+    const panels = Array.isArray(line.panels) ? line.panels : [];
+    if (line.mode === "fon" && panels.length) {
+      for (let index = 0; index < line.count; index++) boxes.push({ line, sequence: index + 1, quantity: panels.reduce((sum, panel) => sum + panel.cut_width / 100, 0), panels });
+    } else if (line.mode === "textile" && panels.length) {
+      for (let index = 0; index < line.pieces; index++) boxes.push({ line, sequence: index + 1, quantity: line.quantity / line.pieces, panels });
     } else {
-      boxes.push({ line, sequence: 1, quantity: line.quantity, panels: line.width ? [{ label: `${line.pieces} adet`, width: line.width, height: line.height }] : [] });
+      // Legacy fabric records may have a category but no saved cutting plan.
+      boxes.push({ line, sequence: 1, quantity: line.quantity, panels: [], needs_cutting_details: true });
     }
   }
   return boxes;
@@ -129,7 +161,9 @@ export function manufacturingBoxes(cart) {
 
 export function createManufacturingHtml(sale, logoUrl = "/sahinsoy-logo.svg") {
   const { cart, header } = restoreSaleDraft(sale);
-  const boxes = manufacturingBoxes(cart);
+  const factoryCart = manufacturingItems(cart);
+  const boxes = manufacturingBoxes(factoryCart);
+  if (!boxes.length) throw new Error("Bu siparişte atölyede dikilecek ürün bulunmuyor.");
   const pageCount = Math.max(1, Math.ceil(boxes.length / 8));
   let content = "";
   for (let page = 0; page < pageCount; page++) {
@@ -137,13 +171,9 @@ export function createManufacturingHtml(sale, logoUrl = "/sahinsoy-logo.svg") {
       const box = boxes[page * 8 + slot];
       if (!box) return '<section class="plan-box blank">—</section>';
       const line = box.line;
-      if (box.mechanical_case) {
-        const position = String(box.position).replace(/^Tek parça$/, "Tek");
-        return `<section class="plan-box mechanical-case"><h2>${safe(line.product_name)} · ${safe(box.case_id)}</h2><div>${lineLocation(line)}</div><div>${safe(line.brand_name)}${line.count > 1 ? ` · ${box.group}. ölçü grubu` : ""}</div><div class="case-caption">${safe(position)} ${box.case_mode === "ortak" ? `parça · ${box.part_index}/${box.part_count}` : "kasa"}</div>${box.case_mode === "ortak" ? `<div>${box.part_count} parçalık ortak kasa · Toplam parça eni ${number(box.case_width)} cm</div><div><strong>Kasa / profil eni: ${box.profile_width_cm > 0 ? `${number(box.profile_width_cm)} cm` : "Belirtilmedi"}</strong></div>` : ""}<div class="mechanical-parts">${box.panels.map((panel) => mechanicalPartDetails(panel, line)).join("")}</div><div class="box-total">1 parça · ${safe(box.case_id)}</div>${line.accessories?.length ? `<div>Aksesuar: ${line.accessories.map((option) => safe(option.name)).join(" · ")}</div>` : ""}${line.item_note ? `<div>Not: ${safe(line.item_note)}</div>` : ""}</section>`;
-      }
-      return `<section class="plan-box"><h2>${safe(line.product_name)}${line.mode === "fon" ? ` · ${box.sequence}. ${line.order_mode === "takim" ? "takım" : "adet"}` : line.mode === "textile" ? ` · ${box.sequence}. parça` : ""}</h2><div>${lineLocation(line)}</div><div>${safe(line.brand_name)}${line.variant ? ` · Renk / VR: ${safe(line.variant)}` : ""}${line.pleat_name ? ` · ${safe(line.pleat_name)}` : ""}</div>${controlDirection(line)}${showFabricSpecs(line) && (line.fabric_width_cm || line.grammage_gr) ? `<div>${line.fabric_width_cm ? `Kumaş eni ${number(line.fabric_width_cm)} cm` : ""}${line.grammage_gr ? ` · ${number(line.grammage_gr)} g` : ""}</div>` : ""}<div class="sketch-row">${box.panels.map((panel) => curtainSketch(line.mode === "fon", panel, fabricLine(line))).join("")}</div><div class="box-total">${fabricLine(line) ? "Giden kumaş" : "Miktar"}: ${number(box.quantity)} ${safe(line.unit_label)}</div>${line.accessories?.length ? `<div>${line.accessories.map((option) => safe(option.name)).join(" · ")}</div>` : ""}${line.item_note ? `<div>Not: ${safe(line.item_note)}</div>` : ""}</section>`;
+      return `<section class="plan-box"><h2>${safe(line.product_name)}${line.mode === "fon" ? ` · ${box.sequence}. ${line.order_mode === "takim" ? "takım" : "adet"}` : line.mode === "textile" ? ` · ${box.sequence}. parça` : ""}</h2><div>${lineLocation(line)}</div><div>${safe(line.brand_name)}${line.variant ? ` · Renk / VR: ${safe(line.variant)}` : ""}${line.pleat_name ? ` · ${safe(line.pleat_name)}` : ""}</div>${controlDirection(line)}${showFabricSpecs(line) && (line.fabric_width_cm || line.grammage_gr) ? `<div>${line.fabric_width_cm ? `Kumaş eni ${number(line.fabric_width_cm)} cm` : ""}${line.grammage_gr ? ` · ${number(line.grammage_gr)} g` : ""}</div>` : ""}<div class="sketch-row">${box.panels.map((panel) => curtainSketch(line.mode === "fon", panel, fabricLine(line))).join("")}</div><div class="box-total">${fabricLine(line) ? "Giden kumaş" : "Miktar"}: ${number(box.quantity)} ${safe(line.unit_label)}</div>${line.accessories?.length ? `<div>${line.accessories.map((option) => safe(option.name)).join(" · ")}</div>` : ""}${box.needs_cutting_details ? `<div>Kesim ölçüleri kayıtlı değil; dikim öncesinde teyit edin.</div>` : ""}${line.item_note ? `<div>Not: ${safe(line.item_note)}</div>` : ""}</section>`;
     }).join("");
-    content += `<main class="sheet plan-sheet">${heading("Atölye Takip Formu", sale, `Sayfa ${page + 1} / ${pageCount}`)}${customerMeta(sale, header, true)}<div class="plan-grid">${slots}</div>${sale.sale_note || header.sale_note ? `<p class="notes"><strong>Not:</strong> ${safe(sale.sale_note || header.sale_note)}</p>` : ""}<p class="footer">${manufacturingFooter(cart)}</p></main>`;
+    content += `<main class="sheet plan-sheet">${heading("Atölye Takip Formu", sale, `Sayfa ${page + 1} / ${pageCount}`)}${customerMeta(sale, header, true)}<div class="plan-grid">${slots}</div>${sale.sale_note || header.sale_note ? `<p class="notes"><strong>Not:</strong> ${safe(sale.sale_note || header.sale_note)}</p>` : ""}<p class="footer">${manufacturingFooter(factoryCart)}</p></main>`;
   }
   return documentShell("Şahinsoy · Atölye Takip Formu", content, logoUrl);
 }
@@ -151,6 +181,7 @@ export function createManufacturingHtml(sale, logoUrl = "/sahinsoy-logo.svg") {
 export function openCurtainPrint(sale, kind = "customer") {
   if (!sale?._id) throw new Error("Önce siparişi kaydedin.");
   if (sale.status === "iptal") throw new Error("İptal edilmiş sipariş için çıktı hazırlanamaz.");
+  if (kind === "manufacturing" && !hasManufacturingItems(restoreSaleDraft(sale).cart)) throw new Error("Bu siparişte atölyede dikilecek ürün bulunmuyor.");
   const popup = window.open("", "_blank");
   if (!popup) throw new Error("Çıktıyı açmak için tarayıcıda açılır pencerelere izin verin.");
   popup.opener = null;
