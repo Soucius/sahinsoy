@@ -60,6 +60,10 @@ function frozenRules(line, product) {
   const snapshot = object(line.pricing_snapshot) ? line.pricing_snapshot : {};
   const measuredMechanical = line.mode === "mechanical" && ["m2", "mt"].includes(line.calc_type);
   const rules = {};
+  for (const key of ["fixed_dimensions", "technical_limits", "supplier_unit"]) {
+    if (has(snapshot, key)) rules[key] = copy(snapshot[key]);
+    else if (product?.[key]) rules[key] = copy(product[key]);
+  }
   for (const key of ruleFields) {
     if (has(snapshot, key)) rules[key] = number(snapshot[key], "Kayıtlı hesaplama kuralı");
     else if (product) rules[key] = number(product[key] ?? 0, "Ürün hesaplama kuralı");
