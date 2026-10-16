@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import api from '../libs/axios';
 import { hasManufacturingItems, openCurtainPrint } from '../libs/curtainPrint';
-import { buildMeasurementRevision, changeMeasurementForms, measurementFormForLine } from '../../../backend/src/libs/orderMeasurement.js';
+import { buildMeasurementRevision, changeMeasurementForms, measurementFormForLine, measurementLineGroups } from '../../../backend/src/libs/orderMeasurement.js';
 const money = value => Number(value || 0).toLocaleString('tr-TR', {
   style: 'currency',
   currency: 'TRY'
@@ -72,6 +72,30 @@ function DimensionInputs({
     <label className="font-semibold">{heightLabel}<input className={input} inputMode="decimal" aria-label={heightLabel} value={value.height ?? ''} onChange={event => onChange('height', event.target.value)} placeholder="Örn. 250" />
     </label>
   </div>;
+}
+function SharedDualMeasurementLine({ line, partner, form, onChange }) {
+  const location = [line.room_name, line.area, line.facade, line.window_name].filter(Boolean).join(' · ');
+  const fabrics = [line, partner].sort((a, b) => a.dual_plise.role === b.dual_plise.role ? 0 : a.dual_plise.role === 'tul' ? -1 : 1);
+  return <article className={card}>
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h3 className="text-xl font-bold">Çiftli plise · {line.dual_plise.glass_label}</h3>
+        {location && <p className="mt-2 font-semibold">{location}</p>}
+        <p className="mt-2 text-[#6f5843]">Kasa rengi: {line.dual_plise.case_color || 'Seçilmedi'} · {number(line.count)} adet çiftli sistem</p>
+      </div>
+      <div className="text-right">
+        <p className="font-semibold">{money(line.item_total + partner.item_total)}</p>
+        <p className="mt-1 text-sm text-[#6f5843]">Kayıtlı ölçü: {dims(line)}</p>
+      </div>
+    </div>
+    <div className="my-4 grid gap-3 sm:grid-cols-2">{fabrics.map(fabric => <div key={fabric.id} className="rounded-xl bg-[#f4ecdf] p-4">
+      <p className="font-bold">{fabric.dual_plise.role === 'tul' ? 'Tül' : 'Güneşlik'} · {fabric.product_name}</p>
+      <p className="mt-1">Renk / VR: {fabric.variant || 'Belirtilmedi'}</p>
+      <p className="mt-2 text-[#6f5843]">{money(fabric.base_unit_price)} / {fabric.unit_label} · {number(fabric.quantity)} {fabric.unit_label} · {money(fabric.item_total)}</p>
+    </div>)}</div>
+    <p className="mb-4 text-[#593d29]">Tek en ve boy iki ürün için birlikte güncellenir. Her ürün kendi kayıtlı birim fiyatı ve hesap kuralıyla hesaplanır.</p>
+    <DimensionInputs value={form} widthLabel="En (cm)" heightLabel="Boy (cm)" onChange={onChange} />
+  </article>;
 }
 function MeasurementLine({
   line,
@@ -484,7 +508,9 @@ export default function SaleMeasurementPage() {
         <h2 className="text-2xl font-bold">Ustanın aldığı yeni ölçüler</h2>
         <p className="mt-2 text-[#6f5843]">Tüm ölçüler santimetredir. Ürün, renk / VR, pile, parça sayısı ve aksesuar seçimi korunur.</p>
       </div>
-      <fieldset disabled={locked || Boolean(review)} className="space-y-4">{measurements.length > 0 && (sale.pos_details?.cart || []).map((line, index) => <MeasurementLine key={line.id || index} line={line} form={measurements[index]} onChange={(key, value) => changeLine(index, key, value)} />)}</fieldset>
+      <fieldset disabled={locked || Boolean(review)} className="space-y-4">{measurements.length > 0 && measurementLineGroups(sale.pos_details?.cart || []).map(({ line, index, partner }) => partner
+        ? <SharedDualMeasurementLine key={line.id || index} line={line} partner={partner} form={measurements[index]} onChange={(key, value) => changeLine(index, key, value)} />
+        : <MeasurementLine key={line.id || index} line={line} form={measurements[index]} onChange={(key, value) => changeLine(index, key, value)} />)}</fieldset>
       {catalogLoading && <p role="status">Hesap kuralları kontrol ediliyor…</p>}
       {catalogWarning && <p className="text-[#6f5843]">Katalog alınamadı. Yeterli hesap bilgisi varsa siparişte kayıtlı kurallar kullanılacak.</p>}
       {preview.error && <p className="rounded-xl border border-[#d8bd8e] bg-[#fff4da] p-4" role="alert">{preview.error}</p>}
