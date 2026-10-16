@@ -40,7 +40,7 @@ export function defaultMeasurement(product) {
   const mode = productMode(product);
   return {
     room_name: "Salon", area: "", facade: "", window_name: "", variant: "", item_note: "",
-    width: mode === "fon" ? "80" : "", height: mode === "standard" ? "" : "260", count: "1", order_mode: mode === "fon" ? "takim" : "adet",
+    width: product.fixed_dimensions?.width_cm ? String(product.fixed_dimensions.width_cm) : mode === "fon" ? "80" : "", height: product.fixed_dimensions?.height_cm ? String(product.fixed_dimensions.height_cm) : mode === "standard" ? "" : "260", count: "1", order_mode: mode === "fon" ? "takim" : "adet",
     right_width: "80", right_height: "260", separate_right: false, pleat_id: "sik", labor_price: "0", currency_rate: "",
     ...(needsControlDirection(product) ? { chain_direction: "" } : {}),
     ...(needsControlDirection(product) && product.calculation_type === "m2" ? { case_mode: "ayri", mechanical_panels: [], profile_width_cm: "" } : {}),
@@ -58,6 +58,16 @@ function nonnegative(value, label) {
   const number = Number(String(value || 0).replace(",", "."));
   if (!Number.isFinite(number) || number < 0) throw new Error(`${label} sıfır veya daha büyük olmalıdır.`);
   return number;
+}
+
+export function validateProductDimensions(product, width, height) {
+  const fixed = product.fixed_dimensions || {};
+  if ((fixed.width_cm > 0 && width !== fixed.width_cm) || (fixed.height_cm > 0 && height !== fixed.height_cm)) throw new Error("Seçilen ürün sabit ölçülüdür; farklı ölçü için uygun ürünü seçin.");
+  const limits = product.technical_limits || {};
+  for (const [value, axis, label] of [[width, "width", "En"], [height, "height", "Boy"]]) {
+    if (value > 0 && ((limits[`min_${axis}_cm`] > 0 && value < limits[`min_${axis}_cm`]) || (limits[`max_${axis}_cm`] > 0 && value > limits[`max_${axis}_cm`]))) throw new Error(`${label}, seçilen sistemin ölçü sınırının dışında. Uygun sistem seçin.`);
+  }
+  if (width > 0 && height > 0 && limits.max_m2 > 0 && width * height / 10000 > limits.max_m2) throw new Error("Ölçü, seçilen sistemin maksimum m² sınırını aşıyor.");
 }
 
 const validIsoDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00.000Z`)) && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
@@ -116,6 +126,7 @@ export function calculateCurtainLine(product, form) {
   const count = positive(form.count, hasMechanicalPanels ? "Kasa düzeni sayısı" : mode === "textile" ? "Parça sayısı" : "Adet / takım sayısı", true);
   let width = hasMechanicalPanels ? 0 : type === "adet" ? nonnegative(form.width, "En") : positive(form.width, "En");
   let height = hasMechanicalPanels ? 0 : mode === "textile" || mode === "fon" || type === "m2" ? positive(form.height, "Boy") : nonnegative(form.height, "Boy");
+  if (!hasMechanicalPanels) validateProductDimensions(product, width, height);
   const chainDirection = requiresDirection && !hasMechanicalPanels ? form.chain_direction : "";
   if (requiresDirection && !hasMechanicalPanels && !["Sağ", "Sol"].includes(chainDirection)) throw new Error("Zincir / ip yönünü seçin.");
   const profileWidth = hasMechanicalPanels && caseMode === "ortak" ? nonnegative(form.profile_width_cm, "Fiziksel kasa / profil eni") : 0;
@@ -167,6 +178,7 @@ export function calculateCurtainLine(product, form) {
         if (!panel || typeof panel !== "object") throw new Error(`${index + 1}. parçanın ölçülerini girin.`);
         const panelWidth = positive(panel.width, `${index + 1}. parça eni`);
         const panelHeight = positive(panel.height, `${index + 1}. parça boyu`);
+        validateProductDimensions(product, panelWidth, panelHeight);
         if (!["Sağ", "Sol"].includes(panel.chain_direction)) throw new Error(`${index + 1}. parça için zincir / ip yönünü seçin.`);
         const positionOverride = panel.position_override === undefined ? "" : panel.position_override;
         if (!["", "Sol", "Orta", "Sağ"].includes(positionOverride)) throw new Error(`${index + 1}. parçanın konumunu seçin.`);
@@ -232,11 +244,14 @@ export function calculateCurtainLine(product, form) {
     ...(requiresDirection && !hasMechanicalPanels ? { chain_direction: chainDirection } : {}),
     ...(supportsPanels ? { case_mode: caseMode, case_count: caseCount, case_width: width, mechanical_panels: mechanicalPanels } : {}),
     ...(hasMechanicalPanels && caseMode === "ortak" ? { profile_width_cm: profileWidth } : {}),
-    quantity, unit_label: type === "mt" ? "m" : type === "m2" ? "m²" : "adet", pleat_name: mode === "textile" || mode === "fon" ? pleat.name : "", pleat_factor: pleat.factor,
+    quantity, unit_label: type === "mt" ? "m" : type === "m2" ? "m²" : product.supplier_unit === "Takım" ? "takım" : "adet", pleat_name: mode === "textile" || mode === "fon" ? pleat.name : "", pleat_factor: pleat.factor,
     base_unit_price: basePrice, material_total: materialTotal, labor_unit_price: laborPrice, labor_total: laborTotal, accessories, accessories_total: accessoriesTotal,
     unit_price: itemTotal / quantity, item_total: itemTotal,
     original_currency: currency, original_unit_price: nativePrice, currency_rate: rate, ...rateSnapshot, calculation_note: note,
     pricing_snapshot: {
+      fixed_dimensions: product.fixed_dimensions ? { ...product.fixed_dimensions } : null,
+      technical_limits: product.technical_limits ? { ...product.technical_limits } : null,
+      supplier_unit: product.supplier_unit || null,
       min_m2: Number(product.min_m2) || 0, rounding_step: Number(product.rounding_step) || 0,
       min_width_cm: Number(product.min_width_cm) || 0, min_height_cm: Number(product.min_height_cm) || 0,
       dimension_rounding_cm: Number(product.dimension_rounding_cm) || 0,
