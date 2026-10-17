@@ -42,6 +42,7 @@ function comparableMeasurements(value) {
   return JSON.stringify(value, (key, item) => ['width', 'height', 'right_width', 'right_height', 'profile_width_cm'].includes(key) ? Number(String(item ?? 0).replace(',', '.')) : item);
 }
 function dims(line) {
+  if (line?.motor_system?.role === 'motor') return `${number(line.quantity)} motor · Perde ölçüsüne bağlı`;
   if (line.mechanical_panels?.length) {
     const panels = line.mechanical_panels.map((panel, index) => `${panel.position || panel.label || `${index + 1}. parça`}: ${number(panel.width)} × ${number(panel.height)} cm`).join(' · ');
     return panels + (Number(line.profile_width_cm) > 0 ? ` · Profil: ${number(line.profile_width_cm)} cm` : '');
@@ -99,12 +100,15 @@ function SharedDualMeasurementLine({ line, partner, form, onChange }) {
 }
 function MeasurementLine({
   line,
+  motor,
   form,
   onChange
 }) {
   const location = [line.room_name, line.area, line.facade, line.window_name].filter(Boolean).join(' · ');
   const team = line.mode === 'fon' && line.order_mode === 'takim';
   const dual = line.dual_plise;
+  const motorized = line.motor_system?.role === 'curtain';
+  const directionLabel = motorized ? 'Motor yönü' : 'Zincir / ip yönü';
   return <article className={card}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
@@ -115,13 +119,19 @@ function MeasurementLine({
         <p className="mt-1 text-sm text-[#6f5843]">Kayıtlı ölçü: {dims(line)}</p>
       </div>
     </div>
+    {motor && <div className="mt-4 rounded-xl border border-[#c8ad8c] bg-[#eee1d0] p-4">
+      <p className="font-bold">Motorlu sistem · {motor.product_name}</p>
+      <p className="mt-2">{number(motor.quantity)} adet × {money(motor.base_unit_price)} = {money(motor.item_total)}</p>
+      <p className="mt-1 text-sm text-[#6f5843]">Her perde parçası için bir motor. Motor adedi, kayıtlı birim fiyatı ve döviz kuru korunur; yeni perde ölçüsü motorun sınırlarına göre kontrol edilir.</p>
+    </div>}
+    {line.motor_system?.role === 'motor' ? <p className="mt-4 text-[#6f5843]">Bu motor bağlı olduğu perdeyle birlikte değerlendirilir. Motor için ayrıca ölçü girilmez.</p> : <>
     {dual && <p className="mt-4 rounded-xl border border-[#c8ad8c] bg-[#eee1d0] px-4 py-3 font-semibold">{dualDetails(line)}. Cam eni iki kumaşta birlikte güncellenir; boy yalnız bu kumaşa aittir.</p>}
     <p className="my-4 rounded-xl bg-[#f4ecdf] px-4 py-3 text-[#593d29]">{team ? `${number(line.count)} takım · ${number(line.pieces)} kanat` : `${number(line.pieces || line.count)} ${line.mode === 'textile' ? 'parça' : line.mode === 'fon' ? 'kanat' : 'adet'}`} · Ürün {money(line.base_unit_price)} / {line.unit_label}{line.labor_unit_price ? ` · İşçilik ${money(line.labor_unit_price)} / m` : ''}. Birim fiyatlar korunur.</p>
     {form.mechanical_panels?.length ? <div className="space-y-4">
       <p className="font-semibold">{line.case_mode === 'ortak' ? 'Ortak kasa' : 'Ayrı kasalar'} · {line.mechanical_panels.length} parça</p>
       {form.mechanical_panels.map((panel, index) => <section key={index} className="rounded-xl border border-[#decdb7] p-4">
         <h4 className="mb-3 font-bold">{line.mechanical_panels[index].position || line.mechanical_panels[index].label || `${index + 1}. parça`} {line.case_mode === 'ortak' ? 'parça' : 'kasa'}</h4>
-        <p className="mb-3 text-sm text-[#6f5843]">Renk / VR: {line.mechanical_panels[index].variant || line.variant || 'Belirtilmedi'} · Zincir / ip yönü: {line.mechanical_panels[index].chain_direction || 'Belirtilmedi'}</p>
+        <p className="mb-3 text-sm text-[#6f5843]">Renk / VR: {line.mechanical_panels[index].variant || line.variant || 'Belirtilmedi'} · {directionLabel}: {line.mechanical_panels[index].chain_direction || 'Belirtilmedi'}</p>
         <DimensionInputs value={panel} widthLabel={`${index + 1}. parça eni (cm)`} heightLabel={`${index + 1}. parça boyu (cm)`} onChange={(key, value) => onChange('mechanical_panels', form.mechanical_panels.map((item, position) => position === index ? {
           ...item,
           [key]: value
@@ -138,7 +148,8 @@ function MeasurementLine({
           height: form.right_height
         }} widthLabel="Sağ kanat eni (cm)" heightLabel="Sağ kanat boyu (cm)" onChange={(key, value) => onChange(key === 'width' ? 'right_width' : 'right_height', value)} />
       </div>}
-      {line.chain_direction && <p className="mt-3 text-[#6f5843]">Zincir / ip yönü: {line.chain_direction}</p>}
+      {line.chain_direction && <p className="mt-3 text-[#6f5843]">{directionLabel}: {line.chain_direction}</p>}
+    </>}
     </>}
   </article>;
 }
@@ -154,7 +165,7 @@ function RevisionHistory({
       {entry.after?.measurement_note && <p className="whitespace-pre-wrap">Not: {entry.after.measurement_note}</p>}
       {entry.kind === 'measurement' && <>
         <p className="font-semibold">Sipariş tutarı: {money(entry.before?.grand_total)} → {money(entry.after?.grand_total)}</p>
-        {(entry.after?.pos_details?.cart || []).map((line, position) => {
+        {measurementLineGroups(entry.after?.pos_details?.cart || []).map(({ line, index: position, motor }) => {
             const before = entry.before?.pos_details?.cart?.[position];
             return <div key={line.id || position} className="rounded-lg bg-[#f4ecdf] p-3">
               <strong>{line.product_name}</strong>
@@ -162,6 +173,7 @@ function RevisionHistory({
               <p className="mt-1">Önce: {before ? dims(before) : 'Kayıt bulunmuyor'}</p>
               <p>Sonra: {dims(line)}</p>
               <p>{number(before?.quantity)} → {number(line.quantity)} {line.unit_label} · {money(before?.item_total)} → {money(line.item_total)}</p>
+              {motor && <p className="mt-2">Motor: {motor.product_name} · {number(motor.quantity)} adet · {money(motor.item_total)}</p>}
             </div>;
           })}
       </>}
@@ -508,9 +520,9 @@ export default function SaleMeasurementPage() {
         <h2 className="text-2xl font-bold">Ustanın aldığı yeni ölçüler</h2>
         <p className="mt-2 text-[#6f5843]">Tüm ölçüler santimetredir. Ürün, renk / VR, pile, parça sayısı ve aksesuar seçimi korunur.</p>
       </div>
-      <fieldset disabled={locked || Boolean(review)} className="space-y-4">{measurements.length > 0 && measurementLineGroups(sale.pos_details?.cart || []).map(({ line, index, partner }) => partner
+      <fieldset disabled={locked || Boolean(review)} className="space-y-4">{measurements.length > 0 && measurementLineGroups(sale.pos_details?.cart || []).map(({ line, index, partner, motor }) => partner
         ? <SharedDualMeasurementLine key={line.id || index} line={line} partner={partner} form={measurements[index]} onChange={(key, value) => changeLine(index, key, value)} />
-        : <MeasurementLine key={line.id || index} line={line} form={measurements[index]} onChange={(key, value) => changeLine(index, key, value)} />)}</fieldset>
+        : <MeasurementLine key={line.id || index} line={line} motor={motor} form={measurements[index]} onChange={(key, value) => changeLine(index, key, value)} />)}</fieldset>
       {catalogLoading && <p role="status">Hesap kuralları kontrol ediliyor…</p>}
       {catalogWarning && <p className="text-[#6f5843]">Katalog alınamadı. Yeterli hesap bilgisi varsa siparişte kayıtlı kurallar kullanılacak.</p>}
       {preview.error && <p className="rounded-xl border border-[#d8bd8e] bg-[#fff4da] p-4" role="alert">{preview.error}</p>}
@@ -539,7 +551,7 @@ export default function SaleMeasurementPage() {
     {review && <section className={`${card} border-2 border-[#80512f]`} aria-label="Ölçü teyidi öncesi kontrol">
       <h2 ref={reviewRef} tabIndex={-1} className="text-2xl font-bold">Yeni ölçüleri teyit et</h2>
       <p className="mt-2">Aşağıdaki ölçüler kaydedilecek. Siparişin ürün ve işçilik fiyatları korunarak miktarlar ve toplam tutar güncellenecek.</p>
-      <div className="mt-4 space-y-3">{review.pos_details.cart.map((line, index) => {
+      <div className="mt-4 space-y-3">{measurementLineGroups(review.pos_details.cart).map(({ line, index, motor }) => {
           const original = sale.pos_details.cart[index];
           return <article key={line.id || index} className="rounded-xl bg-[#f4ecdf] p-4">
             <h3 className="font-bold">{line.product_name}</h3>
@@ -547,6 +559,7 @@ export default function SaleMeasurementPage() {
             <p className="mt-2">Önce: {dims(original)}</p>
             <p>Yeni: {dims(line)}</p>
             <p className="mt-2 font-semibold">{number(original.quantity)} → {number(line.quantity)} {line.unit_label} · {money(original.item_total)} → {money(line.item_total)}</p>
+            {motor && <p className="mt-2">Motor: {motor.product_name} · {number(motor.quantity)} adet · {money(motor.item_total)} · Motor tutarı korunur.</p>}
           </article>;
         })}</div>
       <p className="mt-5 text-xl font-bold">Sipariş toplamı: {money(sale.grand_total)} → {money(review.grand_total)}</p>
