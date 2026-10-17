@@ -56,6 +56,16 @@ function dualDetails(line) {
   const dual = line.dual_plise;
   return dual ? `Çiftli plise · ${dual.glass_label} · ${dual.role === 'tul' ? 'Tül' : 'Güneşlik'} · Kasa rengi: ${dual.case_color || 'Seçilmedi'}` : '';
 }
+function AccessoryDetails({ line }) {
+  if (!line.accessories?.length) return null;
+  return <div className="my-3 rounded-xl border border-[#decdb7] bg-[#fffaf1] px-4 py-3">
+    <p className="font-semibold">Seçili aksesuarlar</p>
+    {line.accessories.map((option, index) => <p key={`${option.name}-${index}`} className="mt-2 text-[#593d29]">
+      <strong>{option.name}</strong>{typeof option.color === 'string' && option.color.trim() ? ` · Renk: ${option.color.trim()}` : ''}
+      <span className="mt-1 block text-sm text-[#6f5843]">{option.pricing_basis === 'yuzde' || option.unit === '%' ? `%${number(option.quantity)} · ${money(option.total)}` : `${number(option.quantity)} ${option.unit || 'adet'} × ${money(option.unit_price)} = ${money(option.total)}`}</span>
+    </p>)}
+  </div>;
+}
 function actorLabel(actor) {
   if (!actor) return 'Belirtilmedi';
   if (typeof actor === 'string') return `Kullanıcı #${actor.slice(-8).toUpperCase()}`;
@@ -93,6 +103,7 @@ function SharedDualMeasurementLine({ line, partner, form, onChange }) {
       <p className="font-bold">{fabric.dual_plise.role === 'tul' ? 'Tül' : 'Güneşlik'} · {fabric.product_name}</p>
       <p className="mt-1">Renk / VR: {fabric.variant || 'Belirtilmedi'}</p>
       <p className="mt-2 text-[#6f5843]">{money(fabric.base_unit_price)} / {fabric.unit_label} · {number(fabric.quantity)} {fabric.unit_label} · {money(fabric.item_total)}</p>
+      <AccessoryDetails line={fabric} />
     </div>)}</div>
     <p className="mb-4 text-[#593d29]">Tek en ve boy iki ürün için birlikte güncellenir. Her ürün kendi kayıtlı birim fiyatı ve hesap kuralıyla hesaplanır.</p>
     <DimensionInputs value={form} widthLabel="En (cm)" heightLabel="Boy (cm)" onChange={onChange} />
@@ -127,6 +138,7 @@ function MeasurementLine({
     {line.motor_system?.role === 'motor' ? <p className="mt-4 text-[#6f5843]">Bu motor bağlı olduğu perdeyle birlikte değerlendirilir. Motor için ayrıca ölçü girilmez.</p> : <>
     {dual && <p className="mt-4 rounded-xl border border-[#c8ad8c] bg-[#eee1d0] px-4 py-3 font-semibold">{dualDetails(line)}. Cam eni iki kumaşta birlikte güncellenir; boy yalnız bu kumaşa aittir.</p>}
     <p className="my-4 rounded-xl bg-[#f4ecdf] px-4 py-3 text-[#593d29]">{team ? `${number(line.count)} takım · ${number(line.pieces)} kanat` : `${number(line.pieces || line.count)} ${line.mode === 'textile' ? 'parça' : line.mode === 'fon' ? 'kanat' : 'adet'}`} · Ürün {money(line.base_unit_price)} / {line.unit_label}{line.labor_unit_price ? ` · İşçilik ${money(line.labor_unit_price)} / m` : ''}. Birim fiyatlar korunur.</p>
+    <AccessoryDetails line={line} />
     {form.mechanical_panels?.length ? <div className="space-y-4">
       <p className="font-semibold">{line.case_mode === 'ortak' ? 'Ortak kasa' : 'Ayrı kasalar'} · {line.mechanical_panels.length} parça</p>
       {form.mechanical_panels.map((panel, index) => <section key={index} className="rounded-xl border border-[#decdb7] p-4">
@@ -173,6 +185,7 @@ function RevisionHistory({
               <p className="mt-1">Önce: {before ? dims(before) : 'Kayıt bulunmuyor'}</p>
               <p>Sonra: {dims(line)}</p>
               <p>{number(before?.quantity)} → {number(line.quantity)} {line.unit_label} · {money(before?.item_total)} → {money(line.item_total)}</p>
+              <AccessoryDetails line={line} />
               {motor && <p className="mt-2">Motor: {motor.product_name} · {number(motor.quantity)} adet · {money(motor.item_total)}</p>}
             </div>;
           })}
@@ -559,6 +572,7 @@ export default function SaleMeasurementPage() {
             <p className="mt-2">Önce: {dims(original)}</p>
             <p>Yeni: {dims(line)}</p>
             <p className="mt-2 font-semibold">{number(original.quantity)} → {number(line.quantity)} {line.unit_label} · {money(original.item_total)} → {money(line.item_total)}</p>
+            <AccessoryDetails line={line} />
             {motor && <p className="mt-2">Motor: {motor.product_name} · {number(motor.quantity)} adet · {money(motor.item_total)} · Motor tutarı korunur.</p>}
           </article>;
         })}</div>
