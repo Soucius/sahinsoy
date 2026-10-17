@@ -8,6 +8,10 @@ import { hasManufacturingItems, openCurtainPrint } from "../libs/curtainPrint.js
 import { calculateMeasurementBatch, createMeasurementRow, getCaseColorOptions, selectCaseColorIndices, supportsMeasurementBatch } from "../libs/pliseBatch.js";
 import { dualPliseRole, getDualCaseColors, validateDualPliseGroups } from "../libs/dualPlise.js";
 import { calculateDualSelection, restoreDualSelection } from "../libs/dualPliseForm.js";
+import { mechanismGroups, motorizedBaseProduct, sanitizedMechanicalIndices, supportsMotorSystem } from "../libs/motorCatalog.js";
+import { calculateMotorSystem, restoreMotorSelection, validateMotorSystemGroups } from "../libs/motorSystem.js";
+import MotorOptions from "../components/MotorOptions.jsx";
+import { isAutomationCategoryName } from "../../../backend/src/libs/posCatalogGroup.js";
 
 const EMPTY_HEADER = { first_name: "", last_name: "", customer_phone: "", customer_address: "", delivery_date: "", delivery_method: "", payment_method: "Nakit", sale_note: "", measurement_status: "preliminary", payment_currency: "TRY", payment_currency_rate: "", payment_rate_mode: "automatic", payment_rate_source: "Harem", payment_rate_type: null, payment_rate_date: null, payment_rate_fetched_at: null, payment_rate_quoted_at: null };
 const nextKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -41,7 +45,7 @@ const POS_STYLE = `
 .curtain-pos{--p-ink:#443325;--p-muted:#806b56;--p-line:#e2d2bd;--p-coffee:#80512f;--p-gold:#efe0ca;color:var(--p-ink);font-size:16px;max-width:1500px;margin:0 auto;padding:4px}.curtain-pos *{box-sizing:border-box}.curtain-pos .pos-brand{display:flex;align-items:center;gap:18px;margin-bottom:20px}.curtain-pos .pos-brand img{width:150px;height:95px;object-fit:contain;border-radius:12px;background:#fff}.curtain-pos h1{font-size:26px;font-weight:750;margin:0}.curtain-pos h2{font-size:21px;font-weight:700;margin:0 0 14px}.curtain-pos h3{font-size:18px;font-weight:700}.curtain-pos p{margin:6px 0}.curtain-pos .muted{color:var(--p-muted);font-size:14px}.curtain-pos .panel{border:1px solid var(--p-line);border-radius:18px;background:#fffdf8;padding:22px;box-shadow:0 5px 24px #5b402509}.curtain-pos .pos-tabs,.curtain-pos .row,.curtain-pos .actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.curtain-pos .pos-tabs{margin-bottom:18px}.curtain-pos button{min-height:48px;border:1px solid var(--p-line);border-radius:11px;padding:11px 17px;background:#fffdf8;color:var(--p-ink);font-weight:650;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer}.curtain-pos button:hover:not(:disabled){background:#f5ebdd;border-color:#b08b64}.curtain-pos button.primary,.curtain-pos button[aria-selected=true],.curtain-pos button.chip[aria-pressed=true]{background:var(--p-coffee);color:#fffaf3;border-color:var(--p-coffee)}.curtain-pos button.primary:hover:not(:disabled){background:#694024}.curtain-pos button:disabled{opacity:.45;cursor:not-allowed}.curtain-pos .button-danger{color:#9c352a}.curtain-pos .filters{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;margin:12px 0 20px}.curtain-pos input,.curtain-pos select,.curtain-pos textarea{display:block;width:100%;min-width:0;border:1px solid var(--p-line);border-radius:10px;padding:12px;font:inherit;background:#fffdf8;color:var(--p-ink);margin-top:6px;min-height:48px}.curtain-pos textarea{min-height:85px}.curtain-pos :is(input,select,textarea,button):focus-visible{outline:3px solid #d5aa7a;outline-offset:2px}.curtain-pos label{font-size:14px;font-weight:650;color:#6c513b;display:block}.curtain-pos .fields{display:grid;grid-template-columns:1fr 1fr;gap:16px}.curtain-pos .full{grid-column:1/-1}.curtain-pos .products{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.curtain-pos button.product-card{display:flex;flex-direction:column;align-items:flex-start;text-align:left;padding:18px;min-height:145px;gap:5px;overflow-wrap:anywhere}.curtain-pos .product-card .product-title{font-size:18px;font-weight:750;color:#4c3524}.curtain-pos .product-card .product-price{font-size:21px;font-weight:750;margin-top:auto;color:#80512f}.curtain-pos .product-card .muted{font-size:13px;font-weight:400}.curtain-pos .empty{padding:36px 15px;text-align:center;color:var(--p-muted)}.curtain-pos .pagination{margin:18px 0 0;justify-content:space-between}.curtain-pos .summary-grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(320px,1fr);gap:20px}.curtain-pos .room-heading{display:flex;gap:8px;align-items:center;font-size:19px;font-weight:750;margin:18px 0 8px;color:#80512f}.curtain-pos .cart-line{padding:15px 0;border-bottom:1px solid var(--p-line);overflow-wrap:anywhere}.curtain-pos .cart-line h3{margin:0}.curtain-pos .cart-line .line-price{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;font-weight:750}.curtain-pos .cart-line button{min-height:38px;padding:6px 10px;font-size:13px}.curtain-pos .price-box{padding:18px;background:var(--p-gold);border-radius:12px;margin:18px 0}.curtain-pos .price-box .big{font-size:28px;font-weight:800}.curtain-pos .total-row{display:flex;justify-content:space-between;gap:14px;margin:8px 0}.curtain-pos .grand-total{font-size:25px;font-weight:800;padding-top:12px;margin-top:12px;border-top:1px solid #c7ac88}.curtain-pos .notice{padding:13px 16px;border:1px solid #d8bd93;background:#f8efdf;border-radius:12px;margin-bottom:16px;font-size:15px}.curtain-pos .saved{border-color:#b9c7a6;background:#f0f3e8}.curtain-pos .error{color:#9e3328;font-weight:600}.curtain-pos .divider{border-top:1px solid var(--p-line);padding-top:18px;margin-top:18px}.curtain-pos .modal-backdrop{position:fixed;inset:0;background:#2a1b1385;z-index:60;display:flex;justify-content:center;align-items:center;padding:18px}.curtain-pos .modal{background:#fffdf8;max-width:860px;width:100%;max-height:calc(100dvh - 36px);border-radius:20px;overflow:auto;border:1px solid #d9c2a5;box-shadow:0 20px 80px #21180c50;padding:24px}.curtain-pos .modal-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}.curtain-pos .modal-heading h2{margin-bottom:4px}.curtain-pos .modal-close{padding:10px;min-width:48px}.curtain-pos .choice-label{margin:16px 0 9px;font-weight:700}.curtain-pos .accessory{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--p-line);border-radius:10px;margin:8px 0}.curtain-pos .accessory input,.curtain-pos .check input{width:21px;min-height:21px;height:21px;margin:0;flex-shrink:0;accent-color:#80512f}.curtain-pos .check{display:flex;align-items:center;gap:10px;margin:12px 0}.curtain-pos fieldset{margin:0;padding:0;border:0}.curtain-pos .review-card{background:#f5ecdf;padding:13px;border-radius:11px;margin:15px 0}.curtain-pos .spin{animation:pos-spin 1s linear infinite}@keyframes pos-spin{to{transform:rotate(360deg)}}@media(min-width:1300px){.curtain-pos .products{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(max-width:900px){.curtain-pos .summary-grid{grid-template-columns:1fr}.curtain-pos .products{grid-template-columns:repeat(2,minmax(0,1fr))}.curtain-pos .filters{grid-template-columns:1fr 1fr}.curtain-pos .filters>label:first-child{grid-column:1/-1}}@media(max-width:550px){.curtain-pos{padding:0}.curtain-pos .panel{padding:16px}.curtain-pos .pos-brand{gap:12px}.curtain-pos .pos-brand img{width:100px;height:75px}.curtain-pos h1{font-size:22px}.curtain-pos .fields{grid-template-columns:1fr}.curtain-pos .full{grid-column:auto}.curtain-pos .modal{padding:17px}.curtain-pos .modal-backdrop{padding:8px}.curtain-pos button.product-card{padding:13px;min-height:145px}.curtain-pos .product-card .product-title{font-size:16px}.curtain-pos .product-card .product-price{font-size:18px}.curtain-pos .actions>button{flex:1 1 180px}.curtain-pos .price-box{padding:14px}.curtain-pos .products{gap:9px}}
 .curtain-pos .pos-room-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}@media(min-width:700px){.curtain-pos .pos-room-options{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .curtain-pos .pos-tabs button[role=tab][aria-selected=true]{background:#80512f!important;color:#fffaf3!important;border-color:#80512f!important}
-.curtain-pos .measure-list{overflow-x:auto;margin:16px 0;border:1px solid var(--p-line);border-radius:12px}.curtain-pos .measure-list table{width:100%;min-width:880px;border-collapse:collapse;text-align:left}.curtain-pos .measure-list th{padding:10px 8px;background:#efe0ca;font-size:13px}.curtain-pos .measure-list td{padding:8px;border-top:1px solid var(--p-line);vertical-align:middle;font-size:14px}.curtain-pos .measure-list input{margin:0;padding:9px;min-width:65px}.curtain-pos .measure-list td:nth-child(1){min-width:105px}.curtain-pos .measure-list td:nth-child(5){min-width:125px}.curtain-pos .measure-list td:nth-child(6){min-width:125px}.curtain-pos .measure-list td:nth-child(7){min-width:100px}.curtain-pos .measure-list td:last-child{min-width:112px}.curtain-pos .measure-list button{padding:10px;min-width:44px}.curtain-pos .measure-list .row{gap:6px;flex-wrap:nowrap}.curtain-pos .modal.modal-measurements{max-width:1100px}.curtain-pos .measure-list select{margin:0;padding:9px;min-width:115px}
+.curtain-pos .measure-list{overflow-x:auto;margin:16px 0;border:1px solid var(--p-line);border-radius:12px}.curtain-pos .measure-list table{width:100%;min-width:880px;border-collapse:collapse;text-align:left}.curtain-pos .measure-list th{padding:10px 8px;background:#efe0ca;font-size:13px}.curtain-pos .measure-list td{padding:8px;border-top:1px solid var(--p-line);vertical-align:middle;font-size:14px}.curtain-pos .measure-list input{margin:0;padding:9px;min-width:65px}.curtain-pos .measure-list td:nth-child(1){min-width:105px}.curtain-pos .measure-list td:nth-child(5){min-width:125px}.curtain-pos .measure-list td:nth-child(6){min-width:125px}.curtain-pos .measure-list td:nth-child(7){min-width:100px}.curtain-pos .measure-list td:last-child{min-width:112px}.curtain-pos .measure-list button{padding:10px;min-width:44px}.curtain-pos .measure-list .row{gap:6px;flex-wrap:nowrap}.curtain-pos .modal.modal-measurements{max-width:1100px}.curtain-pos .measure-list select{margin:0;padding:9px;min-width:115px}.curtain-pos .accessory-group{margin:10px 0;border:1px solid var(--p-line);border-radius:12px;padding:0 12px}.curtain-pos .accessory-group summary{min-height:52px;padding:15px 4px;font-weight:700;cursor:pointer}.curtain-pos .accessory-group[open]{padding-bottom:10px}
 `;
 
 function Field({ label, children, full = false }) {
@@ -54,14 +58,14 @@ function NumberField({ label, value, onChange, min = 0, step = "any", required =
 
 function MechanicalDetails({ line }) {
   if (!hasMechanicalPanels(line)) return null;
-  return <div><p><strong>{line.case_count} kasa · {line.pieces} parça</strong> · {line.case_mode === "ortak" ? "Ortak kasa" : "Ayrı kasalar"}{line.count > 1 ? ` · ${line.count} ölçü grubu` : ""}</p>{line.case_mode === "ortak" && <p>Toplam parça eni: {formatNumber(line.case_width)} cm</p>}{line.case_mode === "ortak" && Number(line.profile_width_cm) > 0 && <p>Kasa / profil eni: {formatNumber(line.profile_width_cm)} cm (imalat bilgisi)</p>}{line.mechanical_panels.map((panel, index) => <div key={index} style={{ marginTop: 8 }}><p>{mechanicalPartTitle(panel, index, line.mechanical_panels.length, line.case_mode)}: <strong>{formatNumber(panel.width)} × {formatNumber(panel.height)} cm</strong></p><p className="muted">Renk / VR: {panel.variant || line.variant || "Belirtilmedi"} · Zincir / ip yönü: {panel.chain_direction}</p>{hasPanelBillingDimensions(panel) && <p className="muted">Hesap ölçüsü: {formatNumber(panel.billable_width)} × {formatNumber(panel.billable_height)} cm</p>}</div>)}</div>;
+  return <div><p><strong>{line.case_count} kasa · {line.pieces} parça</strong> · {line.case_mode === "ortak" ? "Ortak kasa" : "Ayrı kasalar"}{line.count > 1 ? ` · ${line.count} ölçü grubu` : ""}</p>{line.case_mode === "ortak" && <p>Toplam parça eni: {formatNumber(line.case_width)} cm</p>}{line.case_mode === "ortak" && Number(line.profile_width_cm) > 0 && <p>Kasa / profil eni: {formatNumber(line.profile_width_cm)} cm (imalat bilgisi)</p>}{line.mechanical_panels.map((panel, index) => <div key={index} style={{ marginTop: 8 }}><p>{mechanicalPartTitle(panel, index, line.mechanical_panels.length, line.case_mode)}: <strong>{formatNumber(panel.width)} × {formatNumber(panel.height)} cm</strong></p><p className="muted">Renk / VR: {panel.variant || line.variant || "Belirtilmedi"} · {line.motor_system?.role === "curtain" ? "Motor yönü" : "Zincir / ip yönü"}: {panel.chain_direction}</p>{hasPanelBillingDimensions(panel) && <p className="muted">Hesap ölçüsü: {formatNumber(panel.billable_width)} × {formatNumber(panel.billable_height)} cm</p>}</div>)}</div>;
 }
 
 export default function PosPage() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [brands, setBrands] = useState([]);
-  const [filters, setFilters] = useState({ search: "", category: "", brand: "", page: 1 });
+  const [filters, setFilters] = useState({ search: "", category: "", brand: "", page: 1, pos_group: "curtains" });
   const [pages, setPages] = useState(1);
   const [totalProducts, setTotalProducts] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -99,6 +103,17 @@ export default function PosPage() {
   const [dualRefresh, setDualRefresh] = useState(0);
   const [editDualPair, setEditDualPair] = useState(null);
   const [legacyDualHeights, setLegacyDualHeights] = useState(null);
+  const [motorEnabled, setMotorEnabled] = useState(false);
+  const [motorCatalog, setMotorCatalog] = useState([]);
+  const [motorCatalogLoading, setMotorCatalogLoading] = useState(false);
+  const [motorCatalogError, setMotorCatalogError] = useState("");
+  const [motorCatalogRefresh, setMotorCatalogRefresh] = useState(0);
+  const [motorProduct, setMotorProduct] = useState(null);
+  const [motorRateForm, setMotorRateForm] = useState({});
+  const [motorFxSaved, setMotorFxSaved] = useState(false);
+  const [editMotorPair, setEditMotorPair] = useState(null);
+  const manualMotorContext = useRef(null);
+  const motorFxContext = useRef({ currency: "TRY", saved: false, pending: false });
   const [existingId, setExistingId] = useState(null);
   const [savedSale, setSavedSale] = useState(null);
   const [processing, setProcessing] = useState(false);
@@ -118,7 +133,21 @@ export default function PosPage() {
   const dualActive = Boolean(dualRole && dualEnabled);
   const batchAvailable = Boolean(selected && (!editId || dualActive) && supportsMeasurementBatch(selected));
   const batchActive = batchAvailable && (batchEnabled || dualActive);
-  const retainedCartCount = cart.length - (editDualPair?.length || (editId ? 1 : 0));
+  const retainedCartCount = cart.length - (editMotorPair?.length || editDualPair?.length || (editId ? 1 : 0));
+  const motorAvailable = Boolean(selected && supportsMotorSystem(selected));
+  const motorBrandId = selected?.product_brand?._id || "";
+
+  useEffect(() => {
+    if (!motorAvailable) return;
+    const controller = new AbortController();
+    setMotorCatalogLoading(true);
+    setMotorCatalogError("");
+    api.get("/products", { signal: controller.signal, params: { brand: motorBrandId, limit: 3000 } }).then(({ data }) => {
+      if (!controller.signal.aborted) setMotorCatalog(data.products || []);
+    }).catch((error) => { if (!controller.signal.aborted) { setMotorCatalog([]); setMotorCatalogError(error.response?.data?.message || "Motor ve mekanizma listesi yüklenemedi."); } })
+      .finally(() => { if (!controller.signal.aborted) setMotorCatalogLoading(false); });
+    return () => controller.abort();
+  }, [motorAvailable, motorBrandId, motorCatalogRefresh]);
 
   useEffect(() => {
     if (!dualActive || !selected) return;
@@ -142,6 +171,7 @@ export default function PosPage() {
       setFxQuote(data);
       setFxError("");
       setMeasurement((previous) => (!fxContext.current.saved || fxContext.current.pending) && ["USD", "EUR"].includes(fxContext.current.currency) && previous?.currency_rate_mode === "automatic" && !previous.currency_rate ? { ...previous, ...rateFields(data, fxContext.current.currency) } : previous);
+      setMotorRateForm((previous) => motorFxContext.current.pending && !motorFxContext.current.saved && previous.currency_rate_mode === "automatic" && !previous.currency_rate ? { ...previous, ...rateFields(data, motorFxContext.current.currency) } : previous);
     }).catch((error) => {
       if (controller.signal.aborted) return;
       setFxQuote(null);
@@ -181,7 +211,7 @@ export default function PosPage() {
       setLoading(true);
       setFetchError("");
       try {
-        const response = await api.get("/products", { signal: controller.signal, params: { ...filters, limit: 24 } });
+        const response = await api.get("/products", { signal: controller.signal, params: { ...filters, limit: filters.pos_group === "automation" ? 6 : 24 } });
         if (!controller.signal.aborted) {
           setProducts(response.data.products || []);
           setPages(Math.max(1, response.data.totalPages || 1));
@@ -247,6 +277,12 @@ export default function PosPage() {
     try { return { line: calculateCurtainLine(selected, measurement), error: "" }; }
     catch (error) { return { line: null, error: error.message }; }
   }, [selected, measurement, fxLoading]);
+  const motorCalculation = useMemo(() => {
+    if (!motorEnabled || !selected || !measurement) return null;
+    if (!motorProduct) return { value: null, error: "Motor modelini seçin." };
+    try { return { value: calculateMotorSystem(selected, motorProduct, measurement, motorRateForm), error: "" }; }
+    catch (error) { return { value: null, error: error.message }; }
+  }, [motorEnabled, selected, measurement, motorProduct, motorRateForm]);
   const rooms = [...new Set(cart.map((line) => line.room_name))];
   const roomOptions = [...new Set([...ROOM_PRESETS, ...rooms.filter((room) => typeof room === "string" && room.trim())])];
   const dirty = () => { setReviewed(false); setSavedSale(null); };
@@ -267,6 +303,54 @@ export default function PosPage() {
     setFxSaved(false);
     fxContext.current.pending = false;
     setMeasurement((previous) => ({ ...previous, ...manualRateFields }));
+  };
+  const selectMotor = (product) => {
+    const code = product.currency || product.price_currency || "TRY";
+    const quote = !fxLoading && !fxError && isFreshQuote(fxQuote) ? fxQuote : null;
+    motorFxContext.current = { currency: code, saved: false, pending: code !== "TRY" };
+    setMotorFxSaved(false);
+    setMotorProduct(product);
+    setMotorRateForm(code === "TRY" ? { ...manualRateFields, currency_rate: "1" } : rateFields(quote, code));
+    if (code !== "TRY" && !quote && !fxLoading) refreshRates();
+  };
+  const useAutomaticMotorRate = () => {
+    const code = motorFxContext.current.currency;
+    if (fxLoading || !["USD", "EUR"].includes(code)) return;
+    const quote = !fxError && isFreshQuote(fxQuote) ? fxQuote : null;
+    motorFxContext.current = { currency: code, saved: false, pending: true };
+    setMotorFxSaved(false);
+    setMotorRateForm(rateFields(quote, code));
+    if (!quote) refreshRates();
+  };
+  const useManualMotorRate = () => {
+    motorFxContext.current = { ...motorFxContext.current, saved: false, pending: false };
+    setMotorFxSaved(false);
+    setMotorRateForm((previous) => ({ ...previous, ...manualRateFields }));
+  };
+  const changeMotorMode = (enabled) => {
+    if (enabled === motorEnabled || locked || processing) return;
+    if (enabled) {
+      if (motorCatalogLoading || motorCatalogError) { toast.error("Önce motor listesini yükleyin."); return; }
+      const base = motorizedBaseProduct(selected, motorCatalog);
+      if (!base) { toast.error("Bu ürünün redüktörsüz temel fiyatı tanımlı değil. Motorlu fiyat için temel ürün kartını tamamlayın."); return; }
+      const names = measurement.extra_indices.map((index) => selected.extra_options[index]?.option_name);
+      const kept = sanitizedMechanicalIndices(selected, measurement.extra_indices, { motorized: true });
+      manualMotorContext.current = { product: selected, manualNames: names.filter((name) => !kept.some((index) => selected.extra_options[index]?.option_name === name)) };
+      const indices = (base.extra_options || []).flatMap((option, index) => names.includes(option.option_name) ? [index] : []);
+      setSelected(base);
+      setMeasurement((previous) => ({ ...previous, extra_indices: sanitizedMechanicalIndices(base, indices, { motorized: true }) }));
+      setMotorEnabled(true);
+    } else {
+      const context = manualMotorContext.current;
+      if (context) {
+        const names = [...measurement.extra_indices.map((index) => selected.extra_options[index]?.option_name), ...context.manualNames];
+        const indices = (context.product.extra_options || []).flatMap((option, index) => names.includes(option.option_name) ? [index] : []);
+        setSelected(context.product);
+        setMeasurement((previous) => ({ ...previous, extra_indices: sanitizedMechanicalIndices(context.product, indices) }));
+      }
+      manualMotorContext.current = null;
+      setMotorEnabled(false);
+    }
   };
   const refreshPaymentRates = () => { setPaymentLoading(true); setPaymentError(""); setPaymentRefresh((value) => value + 1); };
   const selectPaymentCurrency = (currency) => {
@@ -343,6 +427,8 @@ export default function PosPage() {
   const openProduct = (product) => {
     if (locked || processing) return;
     selectionRequest.current += 1;
+    setMotorEnabled(false); setMotorProduct(null); setEditMotorPair(null); setMotorRateForm({}); setMotorFxSaved(false);
+    manualMotorContext.current = null; motorFxContext.current = { currency: "TRY", saved: false, pending: false };
     const productCurrency = product.currency || product.price_currency || "TRY";
     fxContext.current = { currency: productCurrency, saved: false };
     setFxSaved(false);
@@ -366,6 +452,26 @@ export default function PosPage() {
     if (locked || processing) return;
     const request = ++selectionRequest.current;
     try {
+      if (line.motor_system) {
+        const pair = cart.filter((item) => item.motor_system?.group_id === line.motor_system.group_id);
+        const responses = await Promise.all(pair.map((item) => api.get("/products", { params: { search: item.product_name, limit: 100 } })));
+        if (request !== selectionRequest.current) return;
+        const current = [...new Map(responses.flatMap((response) => response.data.products || []).map((product) => [product._id, product])).values()];
+        const restored = restoreMotorSelection(pair, current);
+        setSelected(restored.curtain); setMeasurement(builderForm(restored.curtain, restored.measurement));
+        setMotorProduct(restored.motor); setMotorRateForm(restored.motorRateForm); setEditMotorPair(pair); setMotorEnabled(true);
+        setEditId(pair.find((item) => item.motor_system.role === "curtain").id);
+        manualMotorContext.current = null;
+        motorFxContext.current = { currency: restored.motor.currency || "TRY", saved: true, pending: false };
+        setMotorFxSaved(motorFxContext.current.currency !== "TRY");
+        fxContext.current = { currency: restored.curtain.currency || "TRY", saved: true, pending: false };
+        setFxSaved(fxContext.current.currency !== "TRY");
+        setDualEnabled(false); setSecondaryProduct(null); setEditDualPair(null); setLegacyDualHeights(null); setBatchEnabled(false);
+        setWizardStep(2);
+        return;
+      }
+      setMotorEnabled(false); setMotorProduct(null); setEditMotorPair(null); setMotorRateForm({}); setMotorFxSaved(false);
+      manualMotorContext.current = null; motorFxContext.current = { currency: "TRY", saved: false, pending: false };
       if (line.dual_plise) {
         const pair = cart.filter((item) => item.dual_plise?.group_id === line.dual_plise.group_id);
         const responses = await Promise.all(pair.map((item) => api.get("/products", { params: { search: item.product_name, limit: 100 } })));
@@ -409,6 +515,22 @@ export default function PosPage() {
   const addLine = () => {
     if (locked || processing) return;
     if (!measurement.room_name.trim()) { toast.error("Oda / bölüm adını girin."); return; }
+    if (motorEnabled || editMotorPair) {
+      if (motorEnabled ? !motorCalculation?.value : !calculation?.line) { toast.error(motorEnabled ? motorCalculation?.error : calculation?.error); return; }
+      const lines = motorEnabled ? motorCalculation.value.lines.map((line) => {
+        const saved = editMotorPair?.find((item) => item.motor_system.role === line.motor_system.role);
+        return { ...line, id: saved?.id || (line.motor_system.role === "curtain" && editId ? editId : line.id), motor_system: { ...line.motor_system, group_id: editMotorPair?.[0].motor_system.group_id || line.motor_system.group_id } };
+      }) : [{ ...calculation.line, id: editId || nextKey() }];
+      if (retainedCartCount + lines.length > 1000) { toast.error("Bir siparişte en fazla 1000 ürün kalemi bulunabilir."); return; }
+      const removed = new Set(editMotorPair?.map((item) => item.id) || (editId ? [editId] : []));
+      const position = cart.findIndex((item) => removed.has(item.id));
+      const updated = cart.filter((item) => !removed.has(item.id));
+      updated.splice(position < 0 ? updated.length : position, 0, ...lines);
+      try { validateMotorSystemGroups(updated); validateDualPliseGroups(updated); } catch (error) { toast.error(error.message); return; }
+      setCart(updated); lastRoom.current = measurement.room_name.trim(); dirty(); closeProduct();
+      toast.success(editId ? "Motorlu sistem güncellendi." : "Motorlu perde siparişe eklendi.");
+      return;
+    }
     if (batchActive) {
       if (!batchCalculation?.value) { toast.error(batchCalculation?.error || "Ölçü satırlarını kontrol edin."); return; }
       if (retainedCartCount + batchCalculation.value.lines.length > 1000) { toast.error("Bir siparişte toplam en fazla 1000 kumaş / ürün kalemi bulunabilir."); return; }
@@ -491,6 +613,8 @@ export default function PosPage() {
   };
 
   const newOrder = () => {
+    setMotorEnabled(false); setMotorProduct(null); setEditMotorPair(null); manualMotorContext.current = null;
+    motorFxContext.current = { currency: "TRY", saved: false, pending: false };
     setCart([]); setHeader({ ...EMPTY_HEADER }); setDiscount("0"); setRecordedFee(0); setExistingId(null); setSavedSale(null); setReviewed(false); closeProduct(); setTab("products");
     restoredId.current = null; idempotencyKey.current = nextKey();
     paymentContext.current = { currency: "TRY", saved: false, pending: false }; setPaymentSaved(false);
@@ -503,11 +627,12 @@ export default function PosPage() {
   const panelBuilderActive = directionRequired && selected?.calculation_type === "m2" && hasMechanicalPanels(measurement);
   const caseColors = selected && supportsMeasurementBatch(selected) ? getCaseColorOptions(selected) : [];
   const selectedCaseColors = caseColors.filter((choice) => measurement?.extra_indices?.includes(choice.index));
-  const otherExtraOptions = (selected?.extra_options || []).map((option, index) => ({ option, index })).filter(({ index }) => !caseColors.some((choice) => choice.index === index));
+  const accessoryGroups = mechanismGroups(selected).map((group) => ({ ...group, options: group.options.filter(({ index }) => !caseColors.some((choice) => choice.index === index) && (!motorEnabled || sanitizedMechanicalIndices(selected, [index], { motorized: true }).length)) })).filter((group) => group.options.length);
   const dualCaseColors = dualActive && secondaryProduct ? getDualCaseColors(selected, secondaryProduct) : [];
   const primaryRoleLabel = dualRole === "tul" ? "Tül" : "Güneşlik";
   const secondaryRoleLabel = dualRole === "tul" ? "Güneşlik" : "Tül";
   const dualGroupIds = [...new Set(cart.filter((line) => line.dual_plise).map((line) => line.dual_plise.group_id))];
+  const motorGroupIds = [...new Set(cart.filter((line) => line.motor_system).map((line) => line.motor_system.group_id))];
 
   return <div className="curtain-pos">
     <style>{POS_STYLE}</style>
@@ -527,10 +652,11 @@ export default function PosPage() {
     {tab === "products" ? <section className="panel" role="tabpanel" aria-label="Ürün seçimi">
       <div className="row" style={{ justifyContent: "space-between" }}><h2>Ürün seçin</h2><span className="muted">{totalProducts} ürün</span></div>
       {locked && <div className="notice">{cancelled ? "Bu sipariş iptal edildi." : delivered ? "Bu iş teslim edildi." : "Bu sipariş onaylandı."} Yeni bir sipariş için <button onClick={newOrder}><Plus size={16} />Yeni sipariş</button></div>}
+      <div className="row" role="group" aria-label="Ürün grubu">{[["curtains", "Perdeler"], ["automation", "Motor ve kumanda"]].map(([value, label]) => <button key={value} type="button" className="chip" aria-pressed={filters.pos_group === value} onClick={() => setFilters((previous) => ({ ...previous, pos_group: value, category: "", search: "", page: 1 }))}>{label}</button>)}</div>
       <div className="filters">
         <Field label={<span className="row"><Search size={16} />Ürün / desen / barkod ara</span>}><input autoComplete="off" value={filters.search} onChange={(event) => updateFilter("search", event.target.value)} placeholder="Örn. Isabella veya 2506" /></Field>
         <Field label="Marka"><select value={filters.brand} onChange={(event) => updateFilter("brand", event.target.value)}><option value="">Tüm markalar</option>{brands.map((brand) => <option key={brand._id} value={brand._id}>{brand.brand_name}</option>)}</select></Field>
-        <Field label="Kategori"><select value={filters.category} onChange={(event) => updateFilter("category", event.target.value)}><option value="">Tüm kategoriler</option>{categories.map((category) => <option key={category._id} value={category._id}>{category.category_name}</option>)}</select></Field>
+        <Field label="Kategori"><select value={filters.category} onChange={(event) => updateFilter("category", event.target.value)}><option value="">Tüm kategoriler</option>{categories.filter((category) => isAutomationCategoryName(category.category_name) === (filters.pos_group === "automation")).map((category) => <option key={category._id} value={category._id}>{category.category_name}</option>)}</select></Field>
       </div>
       {fetchError ? <div className="empty"><p className="error">{fetchError}</p><button onClick={() => setRefresh((value) => value + 1)}>Yeniden dene</button></div> : loading ? <div className="empty" role="status"><Loader2 className="spin" size={28} style={{ margin: "0 auto 10px" }} />Ürünler yükleniyor…</div> : !products.length ? <div className="empty"><Package size={32} style={{ margin: "0 auto" }} /><p>Bu seçimde ürün bulunamadı.</p></div> : <div className="products">{products.map((product) => <button key={product._id} className="product-card" disabled={locked || processing} onClick={() => openProduct(product)}><span className="muted">{product.product_brand?.brand_name} · {product.product_category?.category_name}</span><span className="product-title">{product.product_name}</span>{showFabricSpecs(product) ? <span className="muted">{product.product_color && product.product_color !== "Belirtilmedi" ? product.product_color : "Renk / VR seçimi ürün içinde"}</span> : null}{showFabricSpecs(product) && (product.fabric_width_cm || product.grammage_gr) ? <span className="muted">Kumaş eni {product.fabric_width_cm || "—"} cm · {product.grammage_gr || "—"} g</span> : null}<span className="product-price">{formatMoney(product.sale_price, product.currency || product.price_currency || "TRY")} <span className="muted">/ {product.calculation_type === "m2" ? "m²" : product.calculation_type === "mt" ? "m" : "adet"}</span></span></button>)}</div>}
       <div className="row pagination"><button disabled={filters.page <= 1 || loading} onClick={() => setFilters((previous) => ({ ...previous, page: previous.page - 1 }))}><ArrowLeft size={17} />Önceki</button><span className="muted">Sayfa {filters.page} / {pages}</span><button disabled={filters.page >= pages || loading} onClick={() => setFilters((previous) => ({ ...previous, page: previous.page + 1 }))}>Sonraki<ArrowRight size={17} /></button></div>
@@ -542,7 +668,8 @@ export default function PosPage() {
           {rooms.map((room) => <div key={room}><div className="room-heading"><Home size={20} />{room || "Bölüm belirtilmedi"}</div>{cart.filter((line) => line.room_name === room).map((line) => <article className="cart-line" key={line.id}>
             <h3>{line.product_name}{line.area ? ` · ${line.area}` : ""}</h3><p className="muted">{[line.brand_name, line.variant ? `Renk / VR: ${line.variant}` : "", line.pleat_name, line.facade, line.window_name].filter(Boolean).join(" · ")}</p>
             {line.dual_plise && <p><strong>Çiftli plise {dualGroupIds.indexOf(line.dual_plise.group_id) + 1} · {line.dual_plise.role === "tul" ? "Tül" : "Güneşlik"}</strong>{line.dual_plise.case_color ? ` · Kasa: ${line.dual_plise.case_color}` : ""}</p>}
-            {hasMechanicalPanels(line) ? <MechanicalDetails line={line} /> : <>{line.chain_direction && <p>Zincir / ip yönü: <strong>{line.chain_direction}</strong></p>}{line.mode === "fon" ? <p>{line.count} {line.order_mode === "takim" ? "takım" : "adet"} · {line.pieces} kanat · {line.panels.map((panel) => `${panel.label}: ${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm`).join(" / ")}</p> : line.width || line.height ? <p>En {formatNumber(line.width)} cm · Boy {formatNumber(line.height)} cm{line.mode === "textile" ? ` · ${line.pieces} parça` : ""}</p> : null}</>}
+            {line.motor_system && <p><strong>Motorlu sistem {motorGroupIds.indexOf(line.motor_system.group_id) + 1} · {line.motor_system.role === "curtain" ? "Perde" : "Motor"}</strong></p>}
+            {hasMechanicalPanels(line) ? <MechanicalDetails line={line} /> : <>{line.chain_direction && <p>{line.motor_system?.role === "curtain" ? "Motor yönü" : "Zincir / ip yönü"}: <strong>{line.chain_direction}</strong></p>}{line.mode === "fon" ? <p>{line.count} {line.order_mode === "takim" ? "takım" : "adet"} · {line.pieces} kanat · {line.panels.map((panel) => `${panel.label}: ${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm`).join(" / ")}</p> : line.width || line.height ? <p>En {formatNumber(line.width)} cm · Boy {formatNumber(line.height)} cm{line.mode === "textile" ? ` · ${line.pieces} parça` : ""}</p> : null}</>}
             <p>{line.mode === "fon" || line.mode === "textile" ? "Giden kumaş" : "Miktar"}: <strong>{formatNumber(line.quantity)} {line.unit_label}</strong> × {formatMoney(line.base_unit_price)} = {formatMoney(line.material_total)}</p>
             {line.original_currency && line.original_currency !== "TRY" && <p className="muted">Siparişte kayıtlı kur: 1 {line.original_currency} = {formatExchangeRate(line.currency_rate)} ₺{line.currency_rate_source === "TCMB" && line.currency_rate_date ? ` · TCMB / ${formatRateDate(line.currency_rate_date)}` : " · Elle girilen kur"}</p>}
             {hasBillingDimensions(line) && <p className="muted">Hesap ölçüsü: {formatNumber(line.billable_width)} × {formatNumber(line.billable_height)} cm</p>}
@@ -550,7 +677,7 @@ export default function PosPage() {
             {line.labor_total > 0 && <p>İşçilik: {formatNumber(line.quantity)} m × {formatMoney(line.labor_unit_price)} = {formatMoney(line.labor_total)}</p>}
             {line.accessories?.map((option, index) => <p className="muted" key={index}>{option.name}: {isPercentageOption(option) ? `%${formatRate(option.quantity)} → ${formatMoney(option.total)}` : `${formatNumber(option.quantity)} ${option.unit} × ${formatMoney(option.unit_price)} = ${formatMoney(option.total)}`}</p>)}
             {line.item_note && <p className="muted">Not: {line.item_note}</p>}
-            <div className="line-price"><span>{formatMoney(line.item_total)}</span>{!locked && <div className="row"><button disabled={processing} onClick={() => editLine(line)}>{line.dual_plise ? "Çiftli sistemi düzenle" : "Düzenle"}</button><button className="button-danger" aria-label={`${line.product_name} kalemini kaldır`} disabled={processing} onClick={() => { setCart((previous) => previous.filter((item) => line.dual_plise ? item.dual_plise?.group_id !== line.dual_plise.group_id : item.id !== line.id)); dirty(); }}><Trash2 size={16} />{line.dual_plise ? "Çiftli sistemi kaldır" : "Kaldır"}</button></div>}</div>
+            <div className="line-price"><span>{formatMoney(line.item_total)}</span>{!locked && <div className="row"><button disabled={processing} onClick={() => editLine(line)}>{line.motor_system ? "Motorlu sistemi düzenle" : line.dual_plise ? "Çiftli sistemi düzenle" : "Düzenle"}</button><button className="button-danger" aria-label={`${line.product_name} kalemini kaldır`} disabled={processing} onClick={() => { setCart((previous) => previous.filter((item) => line.motor_system ? item.motor_system?.group_id !== line.motor_system.group_id : line.dual_plise ? item.dual_plise?.group_id !== line.dual_plise.group_id : item.id !== line.id)); dirty(); }}><Trash2 size={16} />{line.motor_system ? "Motorlu sistemi kaldır" : line.dual_plise ? "Çiftli sistemi kaldır" : "Kaldır"}</button></div>}</div>
           </article>)}</div>)}
           <div className="actions divider"><button disabled={processing || locked} onClick={() => setTab("products")}><ArrowLeft size={18} />Ürün eklemeye dön</button></div>
         </section>
@@ -592,7 +719,7 @@ export default function PosPage() {
       {!locked && <p className="muted" style={{ marginTop: 12 }}>İmalat ve müşteri çıktıları, sipariş onaylanıp kaydedildikten sonra açılır.</p>}
     </div>}
 
-    {selected && measurement && <div className="modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) closeProduct(); }}><section className={`modal${batchActive ? " modal-measurements" : ""}`} role="dialog" aria-modal="true" aria-labelledby="pos-product-heading">
+    {selected && measurement && <div className="modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) closeProduct(); }}><section className={`modal${batchActive || motorEnabled ? " modal-measurements" : ""}`} role="dialog" aria-modal="true" aria-labelledby="pos-product-heading">
       <div className="modal-heading"><div><h2 id="pos-product-heading">{selected.product_name}</h2><p className="muted">{selected.product_brand?.brand_name} · Adım {wizardStep} / 2: {wizardStep === 1 ? "Oda, cephe ve pencere" : "Ölçü ve fiyat"}</p></div><button className="modal-close" aria-label="Ürün penceresini kapat" onClick={closeProduct}><X size={23} /></button></div>
       {wizardStep === 1 ? <>
         <h3 className="choice-label">Oda / bölüm seçin</h3>
@@ -603,6 +730,7 @@ export default function PosPage() {
         <p id="pos-room-name-hint" className="muted">İstediğiniz kadar oda ekleyebilirsiniz. Örn. Yatak Odası 2, Çocuk Odası 2. Eklediğiniz oda adları sonraki ürünlerde tekrar seçilebilir.</p>
         <p className="choice-label">Hangi cephe? <span className="muted">İsteğe bağlı</span></p><div className="row">{FACADES.map((facade) => <button key={facade} className="chip" aria-pressed={measurement.facade === facade} onClick={() => updateMeasurement("facade", measurement.facade === facade ? "" : facade)}>{facade}</button>)}</div><p className="choice-label">Hangi pencere? <span className="muted">İsteğe bağlı</span></p><div className="row">{WINDOWS.map((windowName) => <button key={windowName} className="chip" aria-pressed={measurement.window_name === windowName} onClick={() => updateMeasurement("window_name", measurement.window_name === windowName ? "" : windowName)}>{windowName}</button>)}</div><p className="muted divider">Her cepheyi ayrı ürün kalemi olarak ekleyebilirsiniz. Oda ve ürün kalemi sayısında sınır yok.</p><div className="actions divider"><button onClick={closeProduct}>İptal</button><button className="primary" onClick={() => { if (!measurement.room_name.trim()) toast.error("Oda / bölüm adını girin."); else setWizardStep(2); }}>İleri<ArrowRight size={18} /></button></div>
       </> : <>
+        {motorAvailable && <div className="review-card"><h3>Kullanım şekli</h3><div role="group" aria-label="Kullanım şekli" className="row"><button type="button" className="chip" aria-pressed={!motorEnabled} onClick={() => changeMotorMode(false)}>Manuel</button><button type="button" className="chip" aria-pressed={motorEnabled} disabled={motorCatalogLoading || Boolean(motorCatalogError)} onClick={() => changeMotorMode(true)}>Motorlu</button></div><p className="muted">{motorEnabled ? "Her perde parçasına bir motor eklenir. Manuel mekanizma ve redüktör farkları uygulanmaz." : "Motorlu seçerseniz ölçüye uygun motorları aşağıdan seçebilirsiniz."}</p>{motorCatalogLoading && <p className="muted">Motor ve mekanizma listesi yükleniyor…</p>}{motorCatalogError && <p className="error">{motorCatalogError} <button type="button" onClick={() => setMotorCatalogRefresh((value) => value + 1)}>Yeniden dene</button></p>}</div>}
         {dualRole && <div className="review-card"><label className="check"><input type="checkbox" checked={dualActive} disabled={Boolean(editDualPair)} onChange={toggleDual} />Çiftli sisteme çevir · tül + güneşlik</label>{dualActive && <><p className="muted">İlk ürün: {selected.product_name} · {primaryRoleLabel}. İkinci kumaşı aşağıdan seçin. En ve boy bir kez girilir, iki kumaşa da uygulanır. Her kumaş kendi fiyatı ve minimum 1 m² kuralıyla hesaplanır.</p><Field label={`İkinci kumaş · ${secondaryRoleLabel}`}><select value={secondaryProduct?._id || ""} disabled={dualLoading || Boolean(editDualPair)} onChange={(event) => setSecondaryProduct(dualProducts.find((product) => product._id === event.target.value) || null)}><option value="">{dualLoading ? "Ürünler yükleniyor…" : "Seri seçin"}</option>{[...dualProducts, ...(secondaryProduct && !dualProducts.some((product) => product._id === secondaryProduct._id) ? [secondaryProduct] : [])].map((product) => <option key={product._id} value={product._id}>{product.product_name} · {formatMoney(product.sale_price)} / m²</option>)}</select></Field>{dualError && <p className="error">{dualError} <button type="button" onClick={() => setDualRefresh((value) => value + 1)}>Yeniden dene</button></p>}<p className="muted">Aynı cam için tek en, tek boy ve kasa rengi seçilir. İki kumaşın renk / VR seçimleri ayrıdır. Ek çiftli mekanizma ücreti uygulanmaz.</p></>}</div>}
         {batchAvailable && !dualActive && <div className="row" role="group" aria-label="Ölçü giriş şekli"><button type="button" className="chip" aria-pressed={batchEnabled} onClick={() => setBatchEnabled(true)}>Çoklu ölçü listesi</button><button type="button" className="chip" aria-pressed={!batchEnabled} onClick={() => setBatchEnabled(false)}>Tek ölçü</button></div>}
         <div className="fields"><Field label={dualActive ? `${primaryRoleLabel} · ortak renk / VR (isteğe bağlı)` : panelBuilderActive || batchActive ? "Ortak renk / VR numarası (isteğe bağlı)" : "Renk / VR numarası"} full><input list="pos-variant-list" value={measurement.variant} maxLength={150} onChange={(event) => updateMeasurement("variant", event.target.value)} placeholder="Renk / VR seçin veya yazın" /><datalist id="pos-variant-list">{(selected.variants || []).map((variant, index) => { const label = typeof variant === "string" ? variant : [variant.vr || variant.vr_number || variant.variant_code || variant.code, variant.color || variant.color_name].filter(Boolean).join(" · "); return <option key={index} value={label} />; })}</datalist></Field>
@@ -652,19 +780,20 @@ export default function PosPage() {
           <h3>Kasa ve parçalar</h3><div role="group" aria-label="Kasa seçimi" className="row" style={{ marginTop: 12 }}><button type="button" className="chip" aria-pressed={measurement.case_mode === "ayri"} onClick={() => updateMeasurement("case_mode", "ayri")}>Her parça ayrı kasada</button><button type="button" className="chip" aria-pressed={measurement.case_mode === "ortak"} onClick={() => updateMeasurement("case_mode", "ortak")}>Tüm parçalar tek kasada</button></div>
           {measurement.case_mode === "ortak" && <div className="fields divider"><NumberField label="Kasa / profil eni (cm, isteğe bağlı)" value={measurement.profile_width_cm || ""} min={0} onChange={(value) => updateMeasurement("profile_width_cm", value)} /><p className="muted full">Yalnız imalat bilgisi; kasa fiyatı parçaların gerçek enleri toplamından hesaplanır.</p></div>}
           <p className="muted">Her parçanın enini, boyunu ve yönünü girin. Parçaları soldan sağa ekleyin; Sol / Orta / Sağ konumu otomatik belirlenir. Renk / VR isteğe bağlıdır. Ortak renk / VR girilmişse boş bırakılan parçalara uygulanır. Özel konum adlarını Bölüm / cam adı alanına yazabilirsiniz.</p>
-          {measurement.mechanical_panels.map((panel, index) => <section className="review-card" key={index} aria-label={`${index + 1}. mekanik parça`}><div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}><h3>{mechanicalPartTitle(panel, index, measurement.mechanical_panels.length, measurement.case_mode)}</h3><button type="button" className="button-danger" aria-label={`${index + 1}. parçayı kaldır`} disabled={measurement.mechanical_panels.length <= 1} onClick={() => removeMechanicalPanel(index)}><Trash2 size={16} />Kaldır</button></div><div className="fields"><NumberField label={`${index + 1}. parça eni (cm)`} value={panel.width} min={1} onChange={(value) => updateMechanicalPanel(index, "width", value)} /><NumberField label={`${index + 1}. parça boyu (cm)`} value={panel.height} min={1} onChange={(value) => updateMechanicalPanel(index, "height", value)} /><Field label={measurement.case_mode === "ayri" ? "Kasa konumu" : "Parça konumu"}><select aria-label={`${index + 1}. ${measurement.case_mode === "ayri" ? "kasa" : "parça"} konumu`} value={panel.position_override || ""} onChange={(event) => updateMechanicalPanel(index, "position_override", event.target.value)}><option value="">Otomatik ({mechanicalPanelPosition(index, measurement.mechanical_panels.length).replace(/^Tek parça$/, "Tek")})</option><option value="Sol">Sol</option><option value="Orta">Orta</option><option value="Sağ">Sağ</option></select></Field><Field label={`${index + 1}. parça renk / VR numarası (isteğe bağlı)`} full><input list="pos-variant-list" value={panel.variant} maxLength={150} placeholder={measurement.variant || "Renk / VR yazın"} onChange={(event) => updateMechanicalPanel(index, "variant", event.target.value)} /></Field></div><p className="choice-label">Zincir / ip yönü</p><div role="group" aria-label={`${index + 1}. parça zincir / ip yönü`} className="row">{["Sağ", "Sol"].map((direction) => <button key={direction} type="button" className="chip" style={{ minWidth: 120 }} aria-pressed={panel.chain_direction === direction} onClick={() => updateMechanicalPanel(index, "chain_direction", direction)}>{direction}</button>)}</div></section>)}
+          {measurement.mechanical_panels.map((panel, index) => <section className="review-card" key={index} aria-label={`${index + 1}. mekanik parça`}><div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}><h3>{mechanicalPartTitle(panel, index, measurement.mechanical_panels.length, measurement.case_mode)}</h3><button type="button" className="button-danger" aria-label={`${index + 1}. parçayı kaldır`} disabled={measurement.mechanical_panels.length <= 1} onClick={() => removeMechanicalPanel(index)}><Trash2 size={16} />Kaldır</button></div><div className="fields"><NumberField label={`${index + 1}. parça eni (cm)`} value={panel.width} min={1} onChange={(value) => updateMechanicalPanel(index, "width", value)} /><NumberField label={`${index + 1}. parça boyu (cm)`} value={panel.height} min={1} onChange={(value) => updateMechanicalPanel(index, "height", value)} /><Field label={measurement.case_mode === "ayri" ? "Kasa konumu" : "Parça konumu"}><select aria-label={`${index + 1}. ${measurement.case_mode === "ayri" ? "kasa" : "parça"} konumu`} value={panel.position_override || ""} onChange={(event) => updateMechanicalPanel(index, "position_override", event.target.value)}><option value="">Otomatik ({mechanicalPanelPosition(index, measurement.mechanical_panels.length).replace(/^Tek parça$/, "Tek")})</option><option value="Sol">Sol</option><option value="Orta">Orta</option><option value="Sağ">Sağ</option></select></Field><Field label={`${index + 1}. parça renk / VR numarası (isteğe bağlı)`} full><input list="pos-variant-list" value={panel.variant} maxLength={150} placeholder={measurement.variant || "Renk / VR yazın"} onChange={(event) => updateMechanicalPanel(index, "variant", event.target.value)} /></Field></div><p className="choice-label">{motorEnabled ? "Motor yönü" : "Zincir / ip yönü"}</p><div role="group" aria-label={`${index + 1}. parça ${motorEnabled ? "motor yönü" : "zincir / ip yönü"}`} className="row">{["Sağ", "Sol"].map((direction) => <button key={direction} type="button" className="chip" style={{ minWidth: 120 }} aria-pressed={panel.chain_direction === direction} onClick={() => updateMechanicalPanel(index, "chain_direction", direction)}>{direction}</button>)}</div></section>)}
           <button type="button" onClick={addMechanicalPanel}><Plus size={18} />Parça ekle</button>
         </fieldset>}
         {mode === "fon" && measurement.order_mode === "takim" && <><label className="check"><input type="checkbox" checked={measurement.separate_right} onChange={(event) => updateMeasurement("separate_right", event.target.checked)} />Sağ kanat ölçüsü farklı</label>{measurement.separate_right && <div className="fields"><NumberField label="Sağ kanat eni (cm)" value={measurement.right_width} onChange={(value) => updateMeasurement("right_width", value)} min={1} /><NumberField label="Sağ kanat boyu (cm)" value={measurement.right_height} onChange={(value) => updateMeasurement("right_height", value)} min={1} /></div>}</>}
         {(mode === "textile" || mode === "fon") && <p className="muted">Her kanada / parçaya 40 cm dikiş payı eklenir. Boy ölçüsü sadece imalat içindir; fiyatı değiştirmez.</p>}
-        {directionRequired && !panelBuilderActive && <div className="divider"><h3 className="choice-label">Zincir / ip yönü</h3><div role="group" aria-label="Zincir / ip yönü" className="row">{["Sağ", "Sol"].map((direction) => <button key={direction} type="button" className="chip" style={{ minWidth: 120 }} aria-pressed={measurement.chain_direction === direction} disabled={locked || processing} onClick={() => updateMeasurement("chain_direction", direction)}>{direction}</button>)}</div><p className="muted">Ürünün zincir / ip yönünü seçin.</p></div>}
+        {directionRequired && !panelBuilderActive && <div className="divider"><h3 className="choice-label">{motorEnabled ? "Motor yönü" : "Zincir / ip yönü"}</h3><div role="group" aria-label={motorEnabled ? "Motor yönü" : "Zincir / ip yönü"} className="row">{["Sağ", "Sol"].map((direction) => <button key={direction} type="button" className="chip" style={{ minWidth: 120 }} aria-pressed={measurement.chain_direction === direction} disabled={locked || processing} onClick={() => updateMeasurement("chain_direction", direction)}>{direction}</button>)}</div><p className="muted">{motorEnabled ? "Motorun bulunacağı yönü seçin." : "Ürünün zincir / ip yönünü seçin."}</p></div>}
         {selected.calculation_type === "m2" && <div className="notice" style={{ marginTop: 12 }}><strong>m² hesap kuralları</strong><p>Fiyat, en × boy ve adet üzerinden hesaplanır. İmalat için girdiğiniz ölçüler korunur.</p>{Number(selected.min_width_cm) > 0 && <p>Hesapta minimum en: {formatNumber(selected.min_width_cm)} cm</p>}{Number(selected.min_height_cm) > 0 && <p>Hesapta minimum boy: {formatNumber(selected.min_height_cm)} cm</p>}{Number(selected.dimension_rounding_cm) > 0 && <p>Hesapta en ve boy {formatNumber(selected.dimension_rounding_cm)} cm'lik adımlara yukarı yuvarlanır.</p>}{Number(selected.min_m2) > 0 && <p>Minimum miktar: {formatNumber(selected.min_m2)} m² / adet</p>}{Number(selected.rounding_step) > 0 && <p>m² miktarı {formatNumber(selected.rounding_step)} m² adımına yukarı yuvarlanır.</p>}</div>}
         {currency !== "TRY" && <p className="muted">Fiyat {formatMoney(selected.sale_price, currency)} / birim. Seçilen kur bu ürün kalemine kaydedilir; sonraki kur yenilemeleri bu tutarı değiştirmez.</p>}
-        {!dualActive && Boolean(otherExtraOptions.length) && <div className="divider"><h3>{caseColors.length ? "Diğer aksesuar seçenekleri" : "Aksesuar / etek / kasa seçenekleri"}</h3>{otherExtraOptions.map(({ option, index }) => <label className="accessory" key={option._id || index}><input type="checkbox" checked={measurement.extra_indices.includes(index)} onChange={(event) => updateMeasurement("extra_indices", event.target.checked ? [...measurement.extra_indices, index] : measurement.extra_indices.filter((item) => item !== index))} /><span>{option.option_name}<span className="muted"> · {isPercentageOption(option) ? `%${formatRate(option.price_impact)}` : `${formatMoney(option.price_impact, option.currency || currency)} / ${accessoryUnit(option, selected)}`}</span></span></label>)}</div>}
+        {!dualActive && Boolean(accessoryGroups.length) && <div className="divider"><h3>Aksesuar seçenekleri</h3><p className="muted">Eklemek istediğiniz başlığı açın.</p>{accessoryGroups.map((group) => <details key={group.key} className="accessory-group"><summary>{group.label}{measurement.extra_indices.some((index) => group.options.some((entry) => entry.index === index)) ? " · Seçim var" : ""}</summary>{group.options.map(({ option, index }) => <label className="accessory" key={option._id || index}><input type="checkbox" checked={measurement.extra_indices.includes(index)} onChange={(event) => { const indices = event.target.checked ? [...measurement.extra_indices, index] : measurement.extra_indices.filter((item) => item !== index); updateMeasurement("extra_indices", motorAvailable ? sanitizedMechanicalIndices(selected, indices, { motorized: motorEnabled }) : indices); }} /><span>{option.option_name}<span className="muted"> · {isPercentageOption(option) ? "%" + formatRate(option.price_impact) : formatMoney(option.price_impact, option.currency || currency) + " / " + accessoryUnit(option, selected)}</span></span></label>)}</details>)}</div>}
+        {motorEnabled && <MotorOptions product={selected} products={motorCatalog} measurement={measurement} motor={motorProduct} rateForm={motorRateForm} rateSaved={motorFxSaved} loading={motorCatalogLoading} error={motorCatalogError} onRetry={() => setMotorCatalogRefresh((value) => value + 1)} onSelect={selectMotor} onRateChange={(value) => { motorFxContext.current = { ...motorFxContext.current, saved: false, pending: false }; setMotorFxSaved(false); setMotorRateForm((previous) => ({ ...previous, ...manualRateFields, currency_rate: value })); }} onUseAutomatic={useAutomaticMotorRate} onUseManual={useManualMotorRate} fxLoading={fxLoading} />}
         {!dualActive && selected.extra_options?.some((option) => option.pricing_basis === "mt" || option.calculation_type === "mt") && <p className="muted">Metreli aksesuarlar gerçek en üzerinden hesaplanır.</p>}
         <Field label="Ürün / imalat notu" full><textarea maxLength={500} value={measurement.item_note} onChange={(event) => updateMeasurement("item_note", event.target.value)} placeholder="Örn. etek modeli, kasa rengi…" /></Field>
-        <div className="price-box" aria-live="polite">{batchActive ? (batchCalculation?.value ? <><p><strong>{batchRows.length} ölçü satırı · {batchCalculation.value.pieces} adet</strong></p><p>Toplam hesaplanan miktar: <strong>{formatNumber(batchCalculation.value.quantity)} m²</strong></p><p className="big">{formatMoney(batchCalculation.value.total)}</p><p className="muted">Her camın fiyatı kendi ölçüsü ve adedine göre ayrı hesaplandı.</p></> : <p className="error">{batchCalculation?.error}</p>) : calculation?.line ? <><MechanicalDetails line={calculation.line} /><p>{mode === "fon" || mode === "textile" ? "Giden kumaş" : "Hesaplanan miktar"}: <strong>{formatNumber(calculation.line.quantity)} {calculation.line.unit_label}</strong>{mode === "fon" ? ` · ${calculation.line.pieces} kanat` : ""}</p>{hasBillingDimensions(calculation.line) && <p>Hesap ölçüsü: {formatNumber(calculation.line.billable_width)} × {formatNumber(calculation.line.billable_height)} cm</p>}<p>{formatNumber(calculation.line.quantity)} {calculation.line.unit_label} × {formatMoney(calculation.line.base_unit_price)} = {formatMoney(calculation.line.material_total)}</p>{calculation.line.labor_total > 0 && <p>İşçilik: {formatNumber(calculation.line.quantity)} m × {formatMoney(calculation.line.labor_unit_price)} = {formatMoney(calculation.line.labor_total)}</p>}{calculation.line.accessories_total > 0 && <p>Aksesuarlar: {formatMoney(calculation.line.accessories_total)}</p>}<p className="muted">{calculation.line.calculation_note}</p><p className="big">{formatMoney(calculation.line.item_total)}</p></> : <p className="error">{calculation?.error}</p>}</div>
-        <div className="actions"><button onClick={() => setWizardStep(1)}><ArrowLeft size={18} />Geri</button><button className="primary" disabled={(batchActive ? !batchCalculation?.value : !calculation?.line) || locked || processing} onClick={addLine}><Plus size={18} />{editId || editDualPair ? "Değişiklikleri kaydet" : batchActive ? "Tüm ölçüleri siparişe ekle" : "Siparişe ekle"}</button></div>
+        <div className="price-box" aria-live="polite">{motorEnabled ? (motorCalculation?.value ? <><p>Perde ve aksesuarlar: <strong>{formatMoney(motorCalculation.value.curtain.item_total)}</strong></p><p>{motorCalculation.value.motorCount} motor × {formatMoney(motorCalculation.value.motor.base_unit_price)} = <strong>{formatMoney(motorCalculation.value.motor.item_total)}</strong></p><p className="big">{formatMoney(motorCalculation.value.total)}</p><p className="muted">Motor ve perde birlikte siparişe eklenecek.</p></> : <p className="error">{motorCalculation?.error}</p>) : batchActive ? (batchCalculation?.value ? <><p><strong>{batchRows.length} ölçü satırı · {batchCalculation.value.pieces} adet</strong></p><p>Toplam hesaplanan miktar: <strong>{formatNumber(batchCalculation.value.quantity)} m²</strong></p><p className="big">{formatMoney(batchCalculation.value.total)}</p><p className="muted">Her camın fiyatı kendi ölçüsü ve adedine göre ayrı hesaplandı.</p></> : <p className="error">{batchCalculation?.error}</p>) : calculation?.line ? <><MechanicalDetails line={calculation.line} /><p>{mode === "fon" || mode === "textile" ? "Giden kumaş" : "Hesaplanan miktar"}: <strong>{formatNumber(calculation.line.quantity)} {calculation.line.unit_label}</strong>{mode === "fon" ? ` · ${calculation.line.pieces} kanat` : ""}</p>{hasBillingDimensions(calculation.line) && <p>Hesap ölçüsü: {formatNumber(calculation.line.billable_width)} × {formatNumber(calculation.line.billable_height)} cm</p>}<p>{formatNumber(calculation.line.quantity)} {calculation.line.unit_label} × {formatMoney(calculation.line.base_unit_price)} = {formatMoney(calculation.line.material_total)}</p>{calculation.line.labor_total > 0 && <p>İşçilik: {formatNumber(calculation.line.quantity)} m × {formatMoney(calculation.line.labor_unit_price)} = {formatMoney(calculation.line.labor_total)}</p>}{calculation.line.accessories_total > 0 && <p>Aksesuarlar: {formatMoney(calculation.line.accessories_total)}</p>}<p className="muted">{calculation.line.calculation_note}</p><p className="big">{formatMoney(calculation.line.item_total)}</p></> : <p className="error">{calculation?.error}</p>}</div>
+        <div className="actions"><button onClick={() => setWizardStep(1)}><ArrowLeft size={18} />Geri</button><button className="primary" disabled={(motorEnabled ? !motorCalculation?.value : batchActive ? !batchCalculation?.value : !calculation?.line) || locked || processing} onClick={addLine}><Plus size={18} />{editId || editDualPair || editMotorPair ? "Değişiklikleri kaydet" : batchActive ? "Tüm ölçüleri siparişe ekle" : "Siparişe ekle"}</button></div>
       </>}
     </section></div>}
   </div>;
