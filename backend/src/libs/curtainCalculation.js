@@ -44,7 +44,7 @@ export function defaultMeasurement(product) {
     right_width: "80", right_height: "260", separate_right: false, pleat_id: "sik", labor_price: "0", currency_rate: "",
     ...(needsControlDirection(product) ? { chain_direction: "" } : {}),
     ...(needsControlDirection(product) && product.calculation_type === "m2" ? { case_mode: "ayri", mechanical_panels: [], profile_width_cm: "" } : {}),
-    extra_indices: [],
+    extra_indices: [], accessory_colors: {},
   };
 }
 
@@ -58,6 +58,33 @@ function nonnegative(value, label) {
   const number = Number(String(value || 0).replace(",", "."));
   if (!Number.isFinite(number) || number < 0) throw new Error(`${label} sıfır veya daha büyük olmalıdır.`);
   return number;
+}
+
+function accessoryColor(value) {
+  if (typeof value !== "string" || value.trim().length > 100) throw new Error("Aksesuar rengi en fazla 100 karakterlik bir metin olmalıdır.");
+  return value.trim();
+}
+
+function parseAccessoryColors(value) {
+  if (value === undefined) return new Map();
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(value)) || Object.keys(value).length > 1000) {
+    throw new Error("Aksesuar renklerini kontrol edin.");
+  }
+  // Validate stale selections too, but apply colours only to selected extras.
+  return new Map(Object.entries(value).map(([name, color]) => [name, accessoryColor(color)]));
+}
+
+export function accessoryColorsFromLine(line) {
+  if (line?.accessories === undefined) return {};
+  if (!Array.isArray(line.accessories) || line.accessories.length > 1000) throw new Error("Aksesuar renklerini kontrol edin.");
+  const colors = [];
+  for (const option of line.accessories) {
+    if (option?.color === undefined) continue;
+    const color = accessoryColor(option.color);
+    if (color) colors.push([option.name, color]);
+  }
+  return Object.fromEntries(colors);
 }
 
 export function validateProductDimensions(product, width, height) {
@@ -115,6 +142,7 @@ export function calculateCurtainLine(product, form) {
   const rateSnapshot = exchangeRateSnapshot(currency, form);
   const nativePrice = nonnegative(product.sale_price, "Ürün fiyatı");
   const basePrice = roundMoney(nativePrice * rate);
+  const accessoryColors = parseAccessoryColors(form.accessory_colors);
   const requiresDirection = needsControlDirection(product);
   const supportsPanels = requiresDirection && type === "m2";
   const caseMode = form.case_mode || "ayri";
@@ -216,12 +244,14 @@ export function calculateCurtainLine(product, form) {
   const accessories = (form.extra_indices || []).map((index) => {
     const option = product.extra_options?.[index];
     if (!option) throw new Error("Seçilen aksesuar artık bulunamıyor; ürünü tekrar seçin.");
+    const color = accessoryColors.get(option.option_name);
+    const appearance = color ? { color } : {};
     const basis = option.pricing_basis || option.calculation_type || "birim";
     if (basis === "yuzde") {
       const percent = nonnegative(option.price_impact, "Aksesuar yüzdesi");
       if (percent > 100) throw new Error("Aksesuar yüzdesi %100'ü geçemez.");
       if (option.currency && option.currency !== "TRY") throw new Error("Yüzdelik fark için döviz cinsi seçilmez.");
-      return { name: option.option_name, pricing_basis: "yuzde", pricing_scope: option.pricing_scope || "parca", unit: "%", quantity: percent, unit_price: materialTotal / 100, total: roundMoney(materialTotal * percent / 100) };
+      return { name: option.option_name, ...appearance, pricing_basis: "yuzde", pricing_scope: option.pricing_scope || "parca", unit: "%", quantity: percent, unit_price: materialTotal / 100, total: roundMoney(materialTotal * percent / 100) };
     }
     let optionQuantity = quantity;
     if (basis === "adet") optionQuantity = option.pricing_scope === "kasa" ? caseCount : pieces;
@@ -231,7 +261,7 @@ export function calculateCurtainLine(product, form) {
     const optionRate = optionCurrency === "TRY" ? 1 : rate;
     if (optionCurrency !== "TRY" && optionCurrency !== currency) throw new Error("Aksesuarın döviz cinsi ürünün dövizinden farklı. Ayrı ürün kalemi olarak ekleyin.");
     const unitPrice = roundMoney(nonnegative(option.price_impact, "Aksesuar fiyatı") * optionRate);
-    return { name: option.option_name, pricing_basis: basis, pricing_scope: option.pricing_scope || "parca", unit: basis === "birim" ? (type === "mt" ? "m" : type === "m2" ? "m²" : "adet") : basis === "mt" ? "m" : basis === "m2" ? "m²" : "adet", quantity: roundQuantity(optionQuantity), unit_price: unitPrice, total: roundMoney(optionQuantity * unitPrice) };
+    return { name: option.option_name, ...appearance, pricing_basis: basis, pricing_scope: option.pricing_scope || "parca", unit: basis === "birim" ? (type === "mt" ? "m" : type === "m2" ? "m²" : "adet") : basis === "mt" ? "m" : basis === "m2" ? "m²" : "adet", quantity: roundQuantity(optionQuantity), unit_price: unitPrice, total: roundMoney(optionQuantity * unitPrice) };
   });
   const accessoriesTotal = roundMoney(accessories.reduce((total, item) => total + item.total, 0));
   const itemTotal = roundMoney(materialTotal + laborTotal + accessoriesTotal);
@@ -279,8 +309,9 @@ export function salePayload(cart, header, percent, status, existingIdempotencyKe
   const totals = { ...computed, total: roundMoney(computed.total + fee) };
   const payment = paymentConversion(totals.total, header);
   const panelNote = (line) => line.mechanical_panels?.length ? [`${line.case_count} ${line.case_mode === "ortak" ? "ortak" : "ayrı"} kasa · ${line.pieces} parça`, ...line.mechanical_panels.map((panel) => `${panel.label}${panel.position ? ` (${panel.position})` : ""}: ${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm${panel.variant ? ` · Renk / VR: ${panel.variant}` : ""} · ${line.motor_system?.role === "curtain" ? "Motor yönü" : "Zincir / ip yönü"}: ${panel.chain_direction}`)].join(" / ") : "";
+  const accessoryColorNote = (line) => Object.entries(accessoryColorsFromLine(line)).map(([name, color]) => `${name}: ${color}`).join(" / ");
   return {
-    sale_items: cart.map((line) => ({ product: line.product_id, quantity: line.quantity, width: line.width, height: line.height, unit_price: line.unit_price, total_price: line.item_total, room_name: [line.room_name, line.area].filter(Boolean).join(" / "), facade: line.facade, window_name: line.window_name, item_note: [line.variant ? `Renk / VR: ${line.variant}` : "", line.chain_direction ? `${line.motor_system?.role === "curtain" ? "Motor yönü" : "Zincir / ip yönü"}: ${line.chain_direction}` : "", panelNote(line), line.pleat_name, line.item_note].filter(Boolean).join(" · ") })),
+    sale_items: cart.map((line) => ({ product: line.product_id, quantity: line.quantity, width: line.width, height: line.height, unit_price: line.unit_price, total_price: line.item_total, room_name: [line.room_name, line.area].filter(Boolean).join(" / "), facade: line.facade, window_name: line.window_name, item_note: [line.variant ? `Renk / VR: ${line.variant}` : "", line.chain_direction ? `${line.motor_system?.role === "curtain" ? "Motor yönü" : "Zincir / ip yönü"}: ${line.chain_direction}` : "", panelNote(line), accessoryColorNote(line), line.pleat_name, line.item_note].filter(Boolean).join(" · ") })),
     sub_total: totals.subtotal, discount_amount: totals.discountAmount, discount_percent: totals.discountPercent, credit_card_fee: fee, grand_total: totals.total,
     payment_method: header.payment_method, status,
     ...(["preliminary", "confirmed"].includes(header.measurement_status || "preliminary") ? { measurement_status: header.measurement_status || "preliminary" } : {}),
