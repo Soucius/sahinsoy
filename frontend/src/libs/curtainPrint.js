@@ -31,7 +31,7 @@ export function hasManufacturingItems(cart) {
 const mechanicalParts = (line) => Array.isArray(line.mechanical_panels) && line.mechanical_panels.length ? line.mechanical_panels : null;
 const percentageOption = (option) => option.pricing_basis === "yuzde" || option.unit === "%";
 const rate = (value) => safe(Number(value || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 }));
-const accessoryLabel = (option) => `${safe(option.name)}${typeof option.color === "string" && option.color.trim() ? ` (Renk: ${safe(option.color.trim())})` : ""}`;
+const accessoryLabel = (option) => `${safe(option.name)}${Number.isSafeInteger(option.count_per_piece) && option.count_per_piece > 1 ? ` · ${number(option.count_per_piece, 0)} adet / perde` : ""}${typeof option.color === "string" && option.color.trim() ? ` (Renk: ${safe(option.color.trim())})` : ""}`;
 
 function dualPliseGroups(cart) {
   const candidates = new Map();
