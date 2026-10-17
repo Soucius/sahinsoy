@@ -1,4 +1,4 @@
-import { calculateCurtainLine, formatNumber, paymentConversion, PLEATS, productMode, roundMoney, roundQuantity, salePayload } from "./curtainCalculation.js";
+import { accessoryCountsFromLine, calculateCurtainLine, formatNumber, paymentConversion, PLEATS, productMode, roundMoney, roundQuantity, salePayload } from "./curtainCalculation.js";
 import { validateDualPliseGroups } from "./dualPlise.js";
 import { validateMotorSystemGroups } from "./motorSystem.js";
 
@@ -137,7 +137,10 @@ function selectedOptionMetadata(line, accessory, product) {
 function priceAccessories(line, revised, metadata) {
   return (line.accessories || []).map((saved, index) => {
     const { pricing_basis: basis, pricing_scope: scope } = metadata[index];
+    const multiplier = saved.count_per_piece === undefined ? 1 : saved.count_per_piece;
+    if (!Number.isSafeInteger(multiplier) || multiplier < 1 || multiplier > 1000) throw new Error("Kayıtlı ilave aksesuar adedi 1 ile 1000 arasında tam sayı olmalıdır.");
     if (basis === "yuzde") {
+      if (multiplier !== 1) throw new Error("Yüzdelik farkta ilave aksesuar adedi kullanılamaz.");
       const percent = number(saved.quantity, "Kayıtlı aksesuar yüzdesi");
       if (percent > 100) throw new Error("Kayıtlı aksesuar yüzdesi %100'ü geçemez.");
       return { ...copy(saved), pricing_basis: basis, pricing_scope: scope, quantity: percent, unit_price: revised.material_total / 100, total: roundMoney(revised.material_total * percent / 100) };
@@ -147,6 +150,7 @@ function priceAccessories(line, revised, metadata) {
     if (basis === "adet") quantity = scope === "kasa" ? (revised.case_count ?? revised.count) : revised.pieces;
     if (basis === "mt") quantity = ["textile", "fon"].includes(revised.mode) ? revised.quantity : revised.width / 100 * (revised.mechanical_panels?.length ? revised.count : revised.pieces);
     if (basis === "m2") quantity = revised.calc_type === "m2" ? revised.quantity : revised.width * revised.height / 10000 * revised.pieces;
+    quantity *= multiplier;
     return { ...copy(saved), pricing_basis: basis, pricing_scope: scope, quantity: roundQuantity(quantity), unit_price: unitPrice, total: roundMoney(quantity * unitPrice) };
   });
 }
@@ -177,7 +181,7 @@ function reviseLine(line, measurement, product) {
   const form = {
     width, height, count, order_mode: line.order_mode, pleat_id: pleat.id,
     labor_price: labor, currency_rate: rate, chain_direction: line.chain_direction,
-    case_mode: line.case_mode || "ayri", extra_indices: [],
+    case_mode: line.case_mode || "ayri", extra_indices: [], accessory_counts: accessoryCountsFromLine(line),
     room_name: line.room_name, area: line.area, facade: line.facade,
     window_name: line.window_name, variant: line.variant, item_note: line.item_note,
   };
