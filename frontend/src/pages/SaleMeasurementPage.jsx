@@ -61,7 +61,7 @@ function AccessoryDetails({ line }) {
   return <div className="my-3 rounded-xl border border-[#decdb7] bg-[#fffaf1] px-4 py-3">
     <p className="font-semibold">Seçili aksesuarlar</p>
     {line.accessories.map((option, index) => <p key={`${option.name}-${index}`} className="mt-2 text-[#593d29]">
-      <strong>{option.name}</strong>{typeof option.color === 'string' && option.color.trim() ? ` · Renk: ${option.color.trim()}` : ''}
+      <strong>{option.name}</strong>{Number.isSafeInteger(option.count_per_piece) && option.count_per_piece > 1 ? ` · ${number(option.count_per_piece)} adet / perde` : ''}{typeof option.color === 'string' && option.color.trim() ? ` · Renk: ${option.color.trim()}` : ''}
       <span className="mt-1 block text-sm text-[#6f5843]">{option.pricing_basis === 'yuzde' || option.unit === '%' ? `%${number(option.quantity)} · ${money(option.total)}` : `${number(option.quantity)} ${option.unit || 'adet'} × ${money(option.unit_price)} = ${money(option.total)}`}</span>
     </p>)}
   </div>;
