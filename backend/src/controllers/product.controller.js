@@ -1,6 +1,8 @@
 import Product from "../models/Product.js";
+import Category from "../models/Category.js";
 import cloudinary from "../libs/cloudinary.js";
 import { productSearchPattern } from "../libs/productSearch.js";
+import { applyPosCatalogGroup, automationCategoryFilter, parsePosCatalogGroup } from "../libs/posCatalogGroup.js";
 
 function productExtras(body){
     const out={};
@@ -74,6 +76,7 @@ export async function createProduct(req, res) {
 
 export async function getAllProducts(req, res) {
     try {
+        const posGroup = parsePosCatalogGroup(req.query.pos_group);
         const page = parseInt(req.query.page) || 1;
         const limit = Math.min(3000,Math.max(1,parseInt(req.query.limit) || 10));
         const search = productSearchPattern(req.query.search);
@@ -93,6 +96,10 @@ export async function getAllProducts(req, res) {
 
         if (brandId) query.product_brand = brandId;
         if (categoryId) query.product_category = categoryId;
+        if (posGroup) {
+            const automationCategories = await Category.find(automationCategoryFilter()).select("_id").lean();
+            query = applyPosCatalogGroup(query, posGroup, automationCategories.map((category) => category._id));
+        }
 
         const products = await Product.find(query)
             .populate("product_category", "category_name")
@@ -111,6 +118,7 @@ export async function getAllProducts(req, res) {
             totalProducts: total
         });
     } catch (error) {
+        if (error.code === "INVALID_POS_CATALOG_GROUP") return res.status(400).json({ message: error.message });
         console.error("Ürünler getirilirken hata: ", error);
 
         res.status(500).json({ message: "Ürünler listelenirken sunucu hatası oluştu." });
