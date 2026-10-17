@@ -1,5 +1,6 @@
 import { calculateCurtainLine, formatNumber, paymentConversion, PLEATS, productMode, roundMoney, roundQuantity, salePayload } from "./curtainCalculation.js";
 import { validateDualPliseGroups } from "./dualPlise.js";
+import { validateMotorSystemGroups } from "./motorSystem.js";
 
 const ruleFields = ["min_m2", "rounding_step", "min_width_cm", "min_height_cm", "dimension_rounding_cm"];
 const geometryFields = ["width", "height", "billable_width", "billable_height", "profile_width_cm", "case_width", "quantity", "material_total", "labor_total", "accessories_total", "unit_price", "item_total", "calculation_note"];
@@ -51,6 +52,7 @@ export function measurementFormForLine(line) {
 
 /** New shared systems edit both dimensions; legacy pairs retain separate fabric heights. */
 export function changeMeasurementForms(cart, forms, lineIndex, key, value) {
+  if (cart[lineIndex]?.motor_system?.role === "motor") return forms;
   const metadata = cart[lineIndex]?.dual_plise;
   const group = metadata?.group_id;
   const sharedDimension = key === "width" || (key === "height" && metadata?.shared_measurements === true);
@@ -62,13 +64,25 @@ export function changeMeasurementForms(cart, forms, lineIndex, key, value) {
 /** Collapse only validated-shaped shared pairs into one measurement card, preserving DTO indices. */
 export function measurementLineGroups(cart) {
   const paired = new Map();
+  const motors = new Map();
   cart.forEach((line, index) => {
+    if (line.motor_system?.group_id) {
+      const group = line.motor_system.group_id;
+      if (!motors.has(group)) motors.set(group, []);
+      motors.get(group).push(index);
+    }
     if (line.dual_plise?.shared_measurements !== true || !line.dual_plise.group_id) return;
     const group = line.dual_plise.group_id;
     if (!paired.has(group)) paired.set(group, []);
     paired.get(group).push(index);
   });
   return cart.flatMap((line, index) => {
+    const motorIndices = line.motor_system?.group_id ? motors.get(line.motor_system.group_id) : null;
+    if (motorIndices?.length === 2 && ["curtain", "motor"].every((role) => motorIndices.some((position) => cart[position].motor_system.role === role))) {
+      if (line.motor_system.role === "motor") return [];
+      const motorIndex = motorIndices.find((position) => cart[position].motor_system.role === "motor");
+      return [{ line, index, motor: cart[motorIndex], motor_index: motorIndex }];
+    }
     const indices = line.dual_plise?.shared_measurements === true ? paired.get(line.dual_plise.group_id) : null;
     if (indices?.length === 2 && ["tul", "guneslik"].every((role) => indices.some((position) => cart[position].dual_plise.role === role))) {
       if (index !== indices[0]) return [];
@@ -81,6 +95,7 @@ export function measurementLineGroups(cart) {
 export function measurementSummary(line) {
   const { panels, team } = lineShape(line);
   const size = (panel) => `${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm`;
+  if (line.motor_system?.role === "motor") return `${formatNumber(line.quantity, 0)} motor · Perde ölçüsüne bağlı`;
   if (line.dual_plise) return `${line.dual_plise.glass_label} · ${line.dual_plise.role === "tul" ? "Tül" : "Güneşlik"}: ${size(line)} · Kasa rengi: ${line.dual_plise.case_color || "Seçilmedi"}`;
   if (panels) return line.mechanical_panels.map((panel, index) => `${panel.position || `${index + 1}. parça`}: ${size(panel)}`).join(" · ");
   if (team) return `Sol: ${size(line.panels[0])} · Sağ: ${size(line.panels[1])}`;
@@ -143,6 +158,10 @@ function reviseLine(line, measurement, product) {
   if (allowed.some((key) => !has(measurement, key))) throw new Error("Ürünün bütün ölçü alanlarını gönderin.");
   const width = cm(measurement.width, "En", line.calc_type === "adet");
   const height = cm(measurement.height, "Boy", line.calc_type === "adet" || (line.calc_type === "mt" && shape.mode === "mechanical"));
+  if (line.motor_system?.role === "motor") {
+    if (width !== 0 || height !== 0 || width !== line.width || height !== line.height) throw new Error("Motor satırına ayrıca ölçü girilemez; perde ölçüsünü güncelleyin.");
+    return copy(line);
+  }
   const count = number(line.count, "Kayıtlı adet / takım sayısı", 1);
   if (!Number.isInteger(count)) throw new Error("Kayıtlı adet / takım sayısı geçersiz.");
   const currency = line.original_currency || "TRY";
@@ -199,6 +218,11 @@ export function buildMeasurementRevision(sale, input, products = []) {
   const cart = sale?.pos_details?.cart;
   if (!Array.isArray(cart) || !cart.length || !Array.isArray(sale.sale_items) || sale.sale_items.length !== cart.length) throw new Error("Bu eski siparişin ayrıntılı POS ölçü kaydı bulunmuyor. Ölçü güncellemesi için yeni bir sipariş oluşturun.");
   validateDualPliseGroups(cart);
+  validateMotorSystemGroups(cart);
+  if (cart.some((line) => has(line, "motor_system"))) cart.forEach((line, index) => {
+    const item = sale.sale_items[index];
+    if (recordId(item.product) !== recordId(line.product_id) || ["quantity", "width", "height", "unit_price"].some((key) => !Number.isFinite(line[key]) || !Number.isFinite(item[key]) || Math.abs(line[key] - item[key]) > 0.000001) || !Number.isFinite(line.item_total) || !Number.isFinite(item.total_price) || Math.abs(line.item_total - item.total_price) > 0.01) throw new Error("Motorlu ürünler ile sipariş satırları eşleşmiyor.");
+  });
   if (!Array.isArray(input.measurements) || input.measurements.length !== cart.length) throw new Error("Ölçü güncellemesinde siparişin bütün ürünleri yer almalıdır; ürün eklenemez veya çıkarılamaz.");
   const measurements = new Map();
   for (const entry of input.measurements) {
@@ -216,6 +240,7 @@ export function buildMeasurementRevision(sale, input, products = []) {
     return reviseLine(line, measurements.get(id), matches.length === 1 ? matches[0] : null);
   });
   validateDualPliseGroups(revised);
+  validateMotorSystemGroups(revised);
   const discount = number(sale.discount_percent ?? sale.pos_details.discount_percent ?? 0, "Kayıtlı iskonto oranı");
   const fee = number(sale.credit_card_fee ?? 0, "Kayıtlı kredi kartı farkı");
   const priced = salePayload(revised, sale.pos_details.header || {}, discount, sale.status, sale.client_request_id);
