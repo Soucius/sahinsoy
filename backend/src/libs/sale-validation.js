@@ -1,5 +1,6 @@
 import { paymentConversion } from './curtainCalculation.js';
 import { validateDualPliseGroups } from './dualPlise.js';
+import { validateMotorSystemGroups } from './motorSystem.js';
 
 export class SaleInputError extends Error { constructor(message,status=400){super(message);this.status=status;} }
 const round=x=>Math.round((x+Number.EPSILON)*100)/100;
@@ -24,14 +25,15 @@ export function normalizeSale(input){
   if(details&&typeof details==='object'&&!Array.isArray(details)){
     try {
       const cart=details.cart;
-      if(Array.isArray(cart)&&cart.some(line=>line&&Object.prototype.hasOwnProperty.call(line,'dual_plise'))){
+      if(Array.isArray(cart)&&cart.some(line=>line&&['dual_plise','motor_system'].some(key=>Object.prototype.hasOwnProperty.call(line,key)))){
         validateDualPliseGroups(cart);
-        if(cart.length!==items.length)throw new Error('Çiftli plise ürünleri ile sipariş satırları eşleşmiyor.');
+        validateMotorSystemGroups(cart);
+        if(cart.length!==items.length)throw new Error('Bağlı ürünler ile sipariş satırları eşleşmiyor.');
         cart.forEach((line,index)=>{
-          if(!line||typeof line!=='object'||Array.isArray(line))throw new Error('Çiftli plise ürünleri ile sipariş satırları eşleşmiyor.');
+          if(!line||typeof line!=='object'||Array.isArray(line))throw new Error('Bağlı ürünler ile sipariş satırları eşleşmiyor.');
           const item=items[index];
           const product=typeof line.product_id==='object'?line.product_id?._id:line.product_id;
-          if(String(product)!==String(item.product)||['quantity','width','height','unit_price'].some(key=>!finite(line[key])||Math.abs(line[key]-item[key])>.000001)||!finite(line.item_total)||Math.abs(round(line.item_total)-round(item.total_price))>.01)throw new Error('Çiftli plise ürünleri ile sipariş satırları eşleşmiyor.');
+          if(String(product)!==String(item.product)||['quantity','width','height','unit_price'].some(key=>!finite(line[key])||!finite(item[key])||Math.abs(line[key]-item[key])>.000001)||!finite(line.item_total)||Math.abs(round(line.item_total)-round(item.total_price))>.01)throw new Error('Bağlı ürünler ile sipariş satırları eşleşmiyor.');
         });
       }
       const payment=paymentConversion(grandTotal,details.header||{});
