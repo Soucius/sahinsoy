@@ -1,4 +1,4 @@
-import { calculateCurtainLine, defaultMeasurement, roundMoney } from "./curtainCalculation.js";
+import { accessoryColorsFromLine, calculateCurtainLine, defaultMeasurement, roundMoney } from "./curtainCalculation.js";
 import { motorEligibility, motorizedBaseProduct, sanitizedMechanicalIndices, supportsMotorSystem } from "./motorCatalog.js";
 
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
@@ -35,6 +35,7 @@ function measurementFor(line) {
     case_mode: line.case_mode || "ayri", mechanical_panels: copy(line.mechanical_panels || []),
     profile_width_cm: line.profile_width_cm ? String(line.profile_width_cm) : "",
     labor_price: "0", extra_indices: (line.accessories || []).map((_, index) => index),
+    accessory_colors: accessoryColorsFromLine(line),
     ...rateFormFor(line),
   };
 }
@@ -93,7 +94,8 @@ function validateLineAmounts(line, expected) {
   }
   if (line.accessories.length !== expected.accessories.length || line.accessories.some((option, index) => {
     const calculated = expected.accessories[index];
-    return option.name !== calculated.name || !equalNumber(option.quantity, calculated.quantity) || !equalMoney(option.total, calculated.total);
+    return option.name !== calculated.name || text(option.color) !== text(calculated.color)
+      || !equalNumber(option.quantity, calculated.quantity) || !equalMoney(option.total, calculated.total);
   })) throw new Error("Motorlu sistemin kayıtlı aksesuar tutarı hesapla uyuşmuyor.");
 }
 
