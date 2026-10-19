@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowRight, CheckCircle, ClipboardList, Copy, Home, Loader2,
 import { useLocation, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "../libs/axios.js";
-import { accessoryCountsFromLine, accessoryColorsFromLine, calculateCurtainLine, defaultMeasurement, FACADES, formatMoney, formatNumber, mechanicalPanelPosition, needsControlDirection, orderTotals, paymentConversion, PLEATS, productMode, restoreSaleDraft, ROOM_PRESETS, roundMoney, salePayload, showFabricSpecs, supportsFoldingPanels, WINDOWS } from "../libs/curtainCalculation.js";
+import { accessoryCountsFromLine, accessoryColorsFromLine, calculateCurtainLine, defaultMeasurement, FACADES, formatMoney, formatNumber, groupRusticProducts, hasRusticSizePrices, isObaFoldingProduct, isRusticProduct, isRusticSizeCandidate, prepareRusticSizeProduct, rusticFamilyName, mechanicalPanelPosition, needsControlDirection, orderTotals, paymentConversion, PLEATS, productMode, restoreSaleDraft, ROOM_PRESETS, roundMoney, salePayload, showFabricSpecs, supportsFoldingPanels, WINDOWS } from "../libs/curtainCalculation.js";
 import { hasManufacturingItems, openCurtainPrint } from "../libs/curtainPrint.js";
 import { calculateMeasurementBatch, createMeasurementRow, getCaseColorOptions, selectCaseColorIndices, supportsMeasurementBatch } from "../libs/pliseBatch.js";
 import { dualPliseRole, getDualCaseColors, validateDualPliseGroups } from "../libs/dualPlise.js";
@@ -13,7 +13,7 @@ import { calculateMotorSystem, restoreMotorSelection, validateMotorSystemGroups 
 import MotorOptions from "../components/MotorOptions.jsx";
 import HemAccessories from "../components/HemAccessories.jsx";
 import FoldingRodOptions from "../components/FoldingRodOptions.jsx";
-import { foldingRodOption, setFoldingRodCount } from "../libs/foldingRods.js";
+import { foldingRodOption, prepareObaFoldingProduct, setFoldingRodCount } from "../libs/foldingRods.js";
 import { hemAccessoryError, hemAccessoryOptions, normalizeHemForMechanism, selectHemAccessory } from "../libs/hemAccessories.js";
 import { isAutomationCategoryName } from "../../../backend/src/libs/posCatalogGroup.js";
 
@@ -215,8 +215,18 @@ export default function PosPage() {
       setLoading(true);
       setFetchError("");
       try {
-        const response = await api.get("/products", { signal: controller.signal, params: { ...filters, limit: filters.pos_group === "automation" ? 6 : 24 } });
-        if (!controller.signal.aborted) {
+        let response = await api.get("/products", { signal: controller.signal, params: { ...filters, limit: filters.pos_group === "automation" ? 6 : 24 } });
+        const rusticCategory = categories.some((category) => category._id === filters.category && isRusticProduct({ product_category: category }));
+        if (filters.pos_group !== "automation" && (rusticCategory || response.data.products?.some(isRusticSizeCandidate))) {
+          response = await api.get("/products", { signal: controller.signal, params: { ...filters, page: 1, limit: 3000 } });
+          if (response.data.totalProducts > response.data.products?.length) throw new Error("Rustik listesini marka veya model seçerek daraltın.");
+          const grouped = groupRusticProducts(response.data.products || []);
+          if (!controller.signal.aborted) {
+            setProducts(grouped.slice((filters.page - 1) * 24, filters.page * 24));
+            setPages(Math.max(1, Math.ceil(grouped.length / 24)));
+            setTotalProducts(grouped.length);
+          }
+        } else if (!controller.signal.aborted) {
           setProducts(response.data.products || []);
           setPages(Math.max(1, response.data.totalPages || 1));
           setTotalProducts(response.data.totalProducts || 0);
@@ -226,7 +236,7 @@ export default function PosPage() {
       } finally { if (!controller.signal.aborted) setLoading(false); }
     }, 250);
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [filters, refresh]);
+  }, [filters, refresh, categories]);
 
   useEffect(() => {
     let active = true;
@@ -432,9 +442,24 @@ export default function PosPage() {
     setDualEnabled(!dualActive);
   };
 
-  const openProduct = (product) => {
+  const openProduct = async (product) => {
     if (locked || processing) return;
-    selectionRequest.current += 1;
+    const request = ++selectionRequest.current;
+    if (isRusticSizeCandidate(product)) {
+      try {
+        const response = await api.get("/products", { params: { search: rusticFamilyName(product).split(" · ")[0], brand: product.product_brand?._id || "", limit: 3000 } });
+        if (request !== selectionRequest.current) return;
+        if (response.data.totalProducts > response.data.products?.length) throw new Error("Rustik fiyat listesi eksik yüklendi. Aramayı daraltın.");
+        product = prepareRusticSizeProduct(product, response.data.products || []);
+      } catch (error) { if (request === selectionRequest.current) toast.error(error.message || "Rustik ölçü fiyatları yüklenemedi."); return; }
+    }
+    if (isObaFoldingProduct(product)) {
+      try {
+        const response = await api.get("/products", { params: { search: "katlama", brand: product.product_brand?._id || "", limit: 3000 } });
+        if (request !== selectionRequest.current) return;
+        product = prepareObaFoldingProduct(product, response.data.products || []);
+      } catch (error) { if (request === selectionRequest.current) toast.error(error.message || "OBA ara çubuk fiyatı yüklenemedi."); return; }
+    }
     setMotorEnabled(false); setMotorProduct(null); setEditMotorPair(null); setMotorRateForm({}); setMotorFxSaved(false);
     manualMotorContext.current = null; motorFxContext.current = { currency: "TRY", saved: false, pending: false };
     const productCurrency = product.currency || product.price_currency || "TRY";
@@ -498,13 +523,20 @@ export default function PosPage() {
         setWizardStep(2);
         return;
       }
-      const response = await api.get("/products", { params: { search: line.product_name, limit: 100 } });
+      const response = await api.get("/products", { params: { search: isObaFoldingProduct({ ...line, calculation_type: line.calc_type }) ? "katlama" : line.product_name, limit: 3000 } });
       if (request !== selectionRequest.current) return;
-      const currentProduct = response.data.products?.find((item) => item._id === line.product_id);
+      let currentProduct = response.data.products?.find((item) => item._id === line.product_id);
       if (!currentProduct) throw new Error("Ürün katalogda bulunamadı. Bu kalemi kaldırıp yeniden ürün seçebilirsiniz.");
+      if (isObaFoldingProduct(currentProduct)) {
+        currentProduct = prepareObaFoldingProduct(currentProduct, response.data.products || []);
+        currentProduct.extra_options = currentProduct.extra_options.map((option) => {
+          const saved = line.accessories?.find((item) => item.name === option.option_name);
+          return saved ? { ...option, price_impact: saved.unit_price / (option.currency === "TRY" ? 1 : line.currency_rate) } : option;
+        });
+      }
       const savedCurrency = line.original_currency || currentProduct.currency || currentProduct.price_currency || "TRY";
       const savedPrice = Number.isFinite(line.original_unit_price) && line.original_unit_price >= 0 ? line.original_unit_price : savedCurrency === "TRY" && Number.isFinite(line.base_unit_price) ? line.base_unit_price : currentProduct.sale_price;
-      const product = { ...currentProduct, currency: savedCurrency, price_currency: savedCurrency, sale_price: savedPrice };
+      const product = { ...currentProduct, ...(line.pricing_snapshot?.rustic_size_prices ? { product_name: line.product_name, fixed_dimensions: null, rustic_size_prices: line.pricing_snapshot.rustic_size_prices } : {}), currency: savedCurrency, price_currency: savedCurrency, sale_price: savedPrice };
       fxContext.current = { currency: line.original_currency || product.currency || product.price_currency || "TRY", saved: true };
       setFxSaved(fxContext.current.currency !== "TRY");
       setSelected(product);
@@ -667,7 +699,7 @@ export default function PosPage() {
         <Field label="Marka"><select value={filters.brand} onChange={(event) => updateFilter("brand", event.target.value)}><option value="">Tüm markalar</option>{brands.map((brand) => <option key={brand._id} value={brand._id}>{brand.brand_name}</option>)}</select></Field>
         <Field label="Kategori"><select value={filters.category} onChange={(event) => updateFilter("category", event.target.value)}><option value="">Tüm kategoriler</option>{categories.filter((category) => isAutomationCategoryName(category.category_name) === (filters.pos_group === "automation")).map((category) => <option key={category._id} value={category._id}>{category.category_name}</option>)}</select></Field>
       </div>
-      {fetchError ? <div className="empty"><p className="error">{fetchError}</p><button onClick={() => setRefresh((value) => value + 1)}>Yeniden dene</button></div> : loading ? <div className="empty" role="status"><Loader2 className="spin" size={28} style={{ margin: "0 auto 10px" }} />Ürünler yükleniyor…</div> : !products.length ? <div className="empty"><Package size={32} style={{ margin: "0 auto" }} /><p>Bu seçimde ürün bulunamadı.</p></div> : <div className="products">{products.map((product) => <button key={product._id} className="product-card" disabled={locked || processing} onClick={() => openProduct(product)}><span className="muted">{product.product_brand?.brand_name} · {product.product_category?.category_name}</span><span className="product-title">{product.product_name}</span>{showFabricSpecs(product) ? <span className="muted">{product.product_color && product.product_color !== "Belirtilmedi" ? product.product_color : "Renk / VR seçimi ürün içinde"}</span> : null}{showFabricSpecs(product) && (product.fabric_width_cm || product.grammage_gr) ? <span className="muted">Kumaş eni {product.fabric_width_cm || "—"} cm · {product.grammage_gr || "—"} g</span> : null}<span className="product-price">{formatMoney(product.sale_price, product.currency || product.price_currency || "TRY")} <span className="muted">/ {product.calculation_type === "m2" ? "m²" : product.calculation_type === "mt" ? "m" : "adet"}</span></span></button>)}</div>}
+      {fetchError ? <div className="empty"><p className="error">{fetchError}</p><button onClick={() => setRefresh((value) => value + 1)}>Yeniden dene</button></div> : loading ? <div className="empty" role="status"><Loader2 className="spin" size={28} style={{ margin: "0 auto 10px" }} />Ürünler yükleniyor…</div> : !products.length ? <div className="empty"><Package size={32} style={{ margin: "0 auto" }} /><p>Bu seçimde ürün bulunamadı.</p></div> : <div className="products">{products.map((product) => <button key={product._id} className="product-card" disabled={locked || processing} onClick={() => openProduct(product)}><span className="muted">{product.product_brand?.brand_name} · {product.product_category?.category_name}</span><span className="product-title">{product.product_name}</span>{showFabricSpecs(product) ? <span className="muted">{product.product_color && product.product_color !== "Belirtilmedi" ? product.product_color : "Renk / VR seçimi ürün içinde"}</span> : null}{showFabricSpecs(product) && (product.fabric_width_cm || product.grammage_gr) ? <span className="muted">Kumaş eni {product.fabric_width_cm || "—"} cm · {product.grammage_gr || "—"} g</span> : null}<span className="product-price">{hasRusticSizePrices(product) ? `${formatMoney(product.rustic_size_prices[0].sale_price, product.currency || "TRY")} başlangıç` : formatMoney(product.sale_price, product.currency || product.price_currency || "TRY")} <span className="muted">/ {hasRusticSizePrices(product) ? "takım" : product.calculation_type === "m2" ? "m²" : product.calculation_type === "mt" ? "m" : "adet"}</span></span></button>)}</div>}
       <div className="row pagination"><button disabled={filters.page <= 1 || loading} onClick={() => setFilters((previous) => ({ ...previous, page: previous.page - 1 }))}><ArrowLeft size={17} />Önceki</button><span className="muted">Sayfa {filters.page} / {pages}</span><button disabled={filters.page >= pages || loading} onClick={() => setFilters((previous) => ({ ...previous, page: previous.page + 1 }))}>Sonraki<ArrowRight size={17} /></button></div>
       <div className="actions divider"><button className="primary" onClick={() => setTab("summary")}>Sonraki: Sipariş özeti ({cart.length})<ArrowRight size={18} /></button></div>
     </section> : <div role="tabpanel" aria-label="Sipariş özeti">
@@ -678,11 +710,11 @@ export default function PosPage() {
             <h3>{line.product_name}{line.area ? ` · ${line.area}` : ""}</h3><p className="muted">{[line.brand_name, line.variant ? `Renk / VR: ${line.variant}` : "", line.pleat_name, line.facade, line.window_name].filter(Boolean).join(" · ")}</p>
             {line.dual_plise && <p><strong>Çiftli plise {dualGroupIds.indexOf(line.dual_plise.group_id) + 1} · {line.dual_plise.role === "tul" ? "Tül" : "Güneşlik"}</strong>{line.dual_plise.case_color ? ` · Kasa: ${line.dual_plise.case_color}` : ""}</p>}
             {line.motor_system && <p><strong>Motorlu sistem {motorGroupIds.indexOf(line.motor_system.group_id) + 1} · {line.motor_system.role === "curtain" ? "Perde" : "Motor"}</strong></p>}
-            {hasMechanicalPanels(line) ? <MechanicalDetails line={line} /> : <>{line.chain_direction && <p>{line.motor_system?.role === "curtain" ? "Motor yönü" : "Zincir / ip yönü"}: <strong>{line.chain_direction}</strong></p>}{line.mode === "fon" ? <p>{line.count} {line.order_mode === "takim" ? "takım" : "adet"} · {line.pieces} kanat · {line.panels.map((panel) => `${panel.label}: ${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm`).join(" / ")}</p> : line.width || line.height ? <p>En {formatNumber(line.width)} cm · Boy {formatNumber(line.height)} cm{line.mode === "textile" ? ` · ${line.pieces} parça` : ""}</p> : null}</>}
+            {hasMechanicalPanels(line) ? <MechanicalDetails line={line} /> : <>{line.chain_direction && <p>{line.motor_system?.role === "curtain" ? "Motor yönü" : "Zincir / ip yönü"}: <strong>{line.chain_direction}</strong></p>}{line.mode === "fon" ? <p>{line.count} {line.order_mode === "takim" ? "takım" : "adet"} · {line.pieces} kanat · {line.panels.map((panel) => `${panel.label}: ${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm`).join(" / ")}</p> : line.width || line.height ? <p>En {formatNumber(line.width)} cm{!isRusticProduct(line) && <> · Boy {formatNumber(line.height)} cm</>}{line.mode === "textile" ? ` · ${line.pieces} parça` : ""}</p> : null}</>}
             <p>{line.mode === "fon" || line.mode === "textile" ? "Giden kumaş" : "Miktar"}: <strong>{formatNumber(line.quantity)} {line.unit_label}</strong> × {formatMoney(line.base_unit_price)} = {formatMoney(line.material_total)}</p>
             {line.original_currency && line.original_currency !== "TRY" && <p className="muted">Siparişte kayıtlı kur: 1 {line.original_currency} = {formatExchangeRate(line.currency_rate)} ₺{line.currency_rate_source === "TCMB" && line.currency_rate_date ? ` · TCMB / ${formatRateDate(line.currency_rate_date)}` : " · Elle girilen kur"}</p>}
             {hasBillingDimensions(line) && <p className="muted">Hesap ölçüsü: {formatNumber(line.billable_width)} × {formatNumber(line.billable_height)} cm</p>}
-            {line.calc_type === "m2" && line.calculation_note && <p className="muted">{line.calculation_note}</p>}
+            {(line.calc_type === "m2" || isRusticProduct(line)) && line.calculation_note && <p className="muted">{line.calculation_note}</p>}
             {line.labor_total > 0 && <p>İşçilik: {formatNumber(line.quantity)} m × {formatMoney(line.labor_unit_price)} = {formatMoney(line.labor_total)}</p>}
             {line.accessories?.map((option, index) => <p className="muted" key={index}>{option.name}{option.count_per_piece ? ` · ${option.count_per_piece} ilave / perde` : ""}{option.color ? ` · Renk: ${option.color}` : ""}: {isPercentageOption(option) ? `%${formatRate(option.quantity)} → ${formatMoney(option.total)}` : `${formatNumber(option.quantity)} ${option.unit} × ${formatMoney(option.unit_price)} = ${formatMoney(option.total)}`}</p>)}
             {line.item_note && <p className="muted">Not: {line.item_note}</p>}
@@ -747,8 +779,8 @@ export default function PosPage() {
           {mode === "fon" && <Field label="Satış şekli"><select value={measurement.order_mode} onChange={(event) => updateMeasurement("order_mode", event.target.value)}><option value="takim">Takım · 2 kanat</option><option value="adet">Adet · tek kanat</option></select></Field>}
           {!batchActive && caseColors.length > 0 && <Field label="Kasa rengi"><select value={selectedCaseColors.length === 1 ? selectedCaseColors[0].option_name : ""} onChange={(event) => setMeasurement((previous) => ({ ...previous, extra_indices: selectCaseColorIndices(selected, previous.extra_indices, event.target.value) }))}><option value="">Seçilmedi</option>{caseColors.map((choice) => <option key={choice.option_name} value={choice.option_name}>{choice.label}</option>)}</select></Field>}
           {!batchActive && <NumberField label={panelBuilderActive ? "Bu ölçü grubundan kaç adet?" : mode === "textile" ? "Parça sayısı" : (mode === "fon" && measurement.order_mode === "takim") || selected.supplier_unit === "Takım" ? "Takım adedi" : "Adet sayısı"} value={measurement.count} onChange={(value) => updateMeasurement("count", value)} min={1} step={1} />}
-          {!panelBuilderActive && !batchActive && <><NumberField label={mode === "fon" ? (measurement.order_mode === "takim" ? "Sol kanat eni (cm)" : "Kanat eni (cm)") : mode === "textile" ? "Toplam cephe / bitmiş en (cm)" : "En (cm)"} value={measurement.width} onChange={(value) => updateMeasurement("width", value)} min={selected.calculation_type === "adet" ? 0 : 1} readOnly={Boolean(selected.fixed_dimensions?.width_cm)} />
-          <NumberField label={mode === "fon" && measurement.order_mode === "takim" ? "Sol kanat boyu (cm)" : "Boy (cm)"} value={measurement.height} onChange={(value) => updateMeasurement("height", value)} min={selected.calculation_type === "m2" || mode === "fon" || mode === "textile" ? 1 : 0} /></>}
+          {!panelBuilderActive && !batchActive && <><NumberField label={mode === "fon" ? (measurement.order_mode === "takim" ? "Sol kanat eni (cm)" : "Kanat eni (cm)") : mode === "textile" ? "Toplam cephe / bitmiş en (cm)" : "En (cm)"} value={measurement.width} onChange={(value) => updateMeasurement("width", value)} min={selected.calculation_type === "adet" ? 0 : 1} readOnly={Boolean(selected.fixed_dimensions?.width_cm) && !hasRusticSizePrices(selected)} />
+          {!isRusticProduct(selected) && <NumberField label={mode === "fon" && measurement.order_mode === "takim" ? "Sol kanat boyu (cm)" : "Boy (cm)"} value={measurement.height} onChange={(value) => updateMeasurement("height", value)} min={selected.calculation_type === "m2" || mode === "fon" || mode === "textile" ? 1 : 0} />}</>}
           {(mode === "textile" || mode === "fon") && <><Field label="Pile türü"><select value={measurement.pleat_id} onChange={(event) => updateMeasurement("pleat_id", event.target.value)}>{PLEATS.map((pleat) => <option key={pleat.id} value={pleat.id}>{pleat.name} · 1'e {pleat.factor}</option>)}</select></Field><NumberField label="Giden kumaşın metre işçiliği (₺ / m)" value={measurement.labor_price} onChange={(value) => updateMeasurement("labor_price", value)} /></>}
           {currency !== "TRY" && <div className="full review-card">
             <p><strong>{fxSaved ? "Siparişte kayıtlı kur" : "Döviz kuru seçimi"}</strong></p>
@@ -783,7 +815,9 @@ export default function PosPage() {
           {!editDualPair && <button type="button" onClick={() => appendBatchRow()}><Plus size={18} />Ölçü satırı ekle</button>}
           <p className="muted">{dualActive ? "Her satır aynı camdaki tül ve güneşliği birlikte oluşturur. İki kumaşın birim fiyatları ayrı uygulanıp toplanır. Kasa rengi her camda ayrı seçilir." : "Oda, cephe, ortak renk / VR ve aşağıdaki aksesuarlar tüm satırlara uygulanır. Kasa rengi her satırda ayrı seçilir. Satırdaki renk / VR doluysa o renk kullanılır. Her satır siparişte ve imalat formunda ayrı görünür."}</p>
         </fieldset>}
-        {selected.fixed_dimensions?.width_cm > 0 && <p className="muted">Bu ürünün eni sabittir. Farklı en için uygun ölçüdeki ürünü seçin.</p>}
+        {selected.fixed_dimensions?.width_cm > 0 && !hasRusticSizePrices(selected) && <p className="muted">Bu ürünün eni sabittir. Farklı en için uygun ölçüdeki ürünü seçin.</p>}
+        {hasRusticSizePrices(selected) && <section className="notice" aria-label="Rustik ölçü fiyat listesi"><h3>Ölçüye göre takım fiyatı</h3><p>Eni serbest girin. 100 cm altı 100 cm, ara ölçüler bir üst liste ölçüsünün fiyatıyla hesaplanır. Boy ölçüsü kullanılmaz.</p><div className="row">{selected.rustic_size_prices.map((size) => <span key={size.width_cm} style={{ padding: "8px 10px", borderRadius: 8, background: calculation?.line?.billable_width === size.width_cm ? "#e0c7a3" : "#fffdf8", fontWeight: calculation?.line?.billable_width === size.width_cm ? 750 : 400 }}>{formatNumber(size.width_cm, 0)} cm: {formatMoney(size.sale_price, selected.currency || "TRY")} / takım</span>)}</div></section>}
+        {isRusticProduct(selected) && selected.calculation_type === "mt" && <p className="muted">Metre fiyatı: {formatMoney(selected.sale_price, selected.currency || "TRY")} / m · Minimum hesap eni 100 cm. Boy kullanılmaz.</p>}
         {selected.technical_limits && <p className="muted">Sistem sınırları: {[["min_width_cm", "En en az", "cm"], ["max_width_cm", "En en çok", "cm"], ["min_height_cm", "Boy en az", "cm"], ["max_height_cm", "Boy en çok", "cm"], ["max_m2", "Alan en çok", "m²"], ["max_load_kg", "Yük en çok", "kg"], ["tube_diameter_mm", "Boru çapı", "mm"], ["slat_width_mm", "Lamel eni", "mm"]].filter(([key]) => selected.technical_limits[key] > 0).map(([key, label, unit]) => `${label} ${formatNumber(selected.technical_limits[key])} ${unit}`).join(" · ")}. Ölçü girildiğinde ölçü sınırları kontrol edilir; ağırlık ve donanım uyumunu ayrıca kontrol edin.</p>}
         {panelBuilderActive && <fieldset className="divider" disabled={locked || processing}>
           <h3>Kasa ve parçalar</h3><div role="group" aria-label="Kasa seçimi" className="row" style={{ marginTop: 12 }}><button type="button" className="chip" aria-pressed={measurement.case_mode === "ayri"} onClick={() => updateMeasurement("case_mode", "ayri")}>Her parça ayrı kasada</button><button type="button" className="chip" aria-pressed={measurement.case_mode === "ortak"} onClick={() => updateMeasurement("case_mode", "ortak")}>Tüm parçalar tek kasada</button></div>
@@ -796,7 +830,7 @@ export default function PosPage() {
         {(mode === "textile" || mode === "fon") && <p className="muted">Her kanada / parçaya 40 cm dikiş payı eklenir. Boy ölçüsü sadece imalat içindir; fiyatı değiştirmez.</p>}
         {directionRequired && !panelBuilderActive && <div className="divider"><h3 className="choice-label">{motorEnabled ? "Motor yönü" : "Zincir / ip yönü"}</h3><div role="group" aria-label={motorEnabled ? "Motor yönü" : "Zincir / ip yönü"} className="row">{["Sağ", "Sol"].map((direction) => <button key={direction} type="button" className="chip" style={{ minWidth: 120 }} aria-pressed={measurement.chain_direction === direction} disabled={locked || processing} onClick={() => updateMeasurement("chain_direction", direction)}>{direction}</button>)}</div><p className="muted">{motorEnabled ? "Motorun bulunacağı yönü seçin." : "Ürünün zincir / ip yönünü seçin."}</p></div>}
         {selected.calculation_type === "m2" && <div className="notice" style={{ marginTop: 12 }}><strong>m² hesap kuralları</strong><p>Fiyat, en × boy ve adet üzerinden hesaplanır. İmalat için girdiğiniz ölçüler korunur.</p>{Number(selected.min_width_cm) > 0 && <p>Hesapta minimum en: {formatNumber(selected.min_width_cm)} cm</p>}{Number(selected.min_height_cm) > 0 && <p>Hesapta minimum boy: {formatNumber(selected.min_height_cm)} cm</p>}{Number(selected.dimension_rounding_cm) > 0 && <p>Hesapta en ve boy {formatNumber(selected.dimension_rounding_cm)} cm'lik adımlara yukarı yuvarlanır.</p>}{Number(selected.min_m2) > 0 && <p>Minimum miktar: {formatNumber(selected.min_m2)} m² / adet</p>}{Number(selected.rounding_step) > 0 && <p>m² miktarı {formatNumber(selected.rounding_step)} m² adımına yukarı yuvarlanır.</p>}</div>}
-        {currency !== "TRY" && <p className="muted">Fiyat {formatMoney(selected.sale_price, currency)} / birim. Seçilen kur bu ürün kalemine kaydedilir; sonraki kur yenilemeleri bu tutarı değiştirmez.</p>}
+        {currency !== "TRY" && <p className="muted">{hasRusticSizePrices(selected) ? "Takım fiyatı girilen ene göre listeden seçilir." : `Fiyat ${formatMoney(selected.sale_price, currency)} / birim.`} Seçilen kur bu ürün kalemine kaydedilir; sonraki kur yenilemeleri bu tutarı değiştirmez.</p>}
         <FoldingRodOptions product={selected} measurement={measurement} line={calculation?.line} onChange={(value) => setMeasurement((previous) => setFoldingRodCount(selected, previous, value))} />
         <HemAccessories product={selected} measurement={measurement} onModelChange={(value) => setMeasurement((previous) => selectHemAccessory(selected, previous, value))} onColorChange={(name, color) => setMeasurement((previous) => ({ ...previous, accessory_colors: { ...(previous.accessory_colors || {}), [name]: color } }))} />
         {!dualActive && Boolean(accessoryGroups.length) && <div className="divider"><h3>Aksesuar seçenekleri</h3><p className="muted">Eklemek istediğiniz başlığı açın.</p>{accessoryGroups.map((group) => <details key={group.key} className="accessory-group"><summary>{group.label}{measurement.extra_indices.some((index) => group.options.some((entry) => entry.index === index)) ? " · Seçim var" : ""}</summary>{group.options.map(({ option, index }) => <label className="accessory" key={option._id || index}><input type="checkbox" checked={measurement.extra_indices.includes(index)} onChange={(event) => { const indices = event.target.checked ? [...measurement.extra_indices, index] : measurement.extra_indices.filter((item) => item !== index); setMeasurement((previous) => normalizeHemForMechanism(selected, { ...previous, extra_indices: motorAvailable ? sanitizedMechanicalIndices(selected, indices, { motorized: motorEnabled }) : indices })); }} /><span>{option.option_name}<span className="muted"> · {isPercentageOption(option) ? "%" + formatRate(option.price_impact) : formatMoney(option.price_impact, option.currency || currency) + " / " + accessoryUnit(option, selected)}</span></span></label>)}</details>)}</div>}
