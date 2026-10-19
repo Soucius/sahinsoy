@@ -20,3 +20,8 @@ export function nextFacadeMeasurement(product, current, cart) {
   // Each new physical window must receive its own dimensions and hardware choices.
   return { ...next, area: nextFacadeName(cart, next.room_name), width: '', height: '', right_width: '', right_height: '' };
 }
+
+export function changeFacadeRoom(current, roomName, cart) {
+  const autoLabel = /^Cam \d+$/.test(String(current.area || ''));
+  return { ...current, room_name: roomName, ...(autoLabel ? { area: nextFacadeName(cart, roomName) } : {}) };
+}
