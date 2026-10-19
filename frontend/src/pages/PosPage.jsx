@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "../libs/axios.js";
 import { accessoryCountsFromLine, accessoryColorsFromLine, calculateCurtainLine, defaultMeasurement, FACADES, formatMoney, formatNumber, groupRusticProducts, hasRusticSizePrices, isObaFoldingProduct, isRusticProduct, isRusticSizeCandidate, prepareRusticSizeProduct, rusticFamilyName, mechanicalPanelPosition, needsControlDirection, orderTotals, paymentConversion, PLEATS, productMode, restoreSaleDraft, ROOM_PRESETS, roundMoney, salePayload, showFabricSpecs, supportsFoldingPanels, WINDOWS } from "../libs/curtainCalculation.js";
+import { discountForAgreedTotal, discountLabel, discountPercentInput } from "../libs/agreedPrice.js";
 import { discountedCart } from "../libs/discountPresentation.js";
 import { hasManufacturingItems, openCurtainPrint } from "../libs/curtainPrint.js";
 import { calculateMeasurementBatch, createMeasurementRow, getCaseColorOptions, selectCaseColorIndices, supportsMeasurementBatch } from "../libs/pliseBatch.js";
@@ -93,6 +94,7 @@ export default function PosPage() {
   const [cart, setCart] = useState([]);
   const [header, setHeader] = useState({ ...EMPTY_HEADER });
   const [discount, setDiscount] = useState("0");
+  const [agreedPrice, setAgreedPrice] = useState(null);
   const [recordedFee, setRecordedFee] = useState(0);
   const [selected, setSelected] = useState(null);
   const [measurement, setMeasurement] = useState(null);
@@ -273,10 +275,23 @@ export default function PosPage() {
     try { return discountedCart(cart, discount); }
     catch { return cart; }
   }, [cart, discount]);
+  const agreedPriceActive = agreedPrice?.cart === cart;
   const totals = useMemo(() => {
-    try { const calculated = orderTotals(cart, discount); return { ...calculated, total: roundMoney(calculated.total + recordedFee), error: "" }; }
+    try {
+      if (agreedPriceActive && agreedPrice.error) throw new Error(agreedPrice.error);
+      const calculated = orderTotals(cart, discount); return { ...calculated, total: roundMoney(calculated.total + recordedFee), error: "" }; }
     catch (error) { return { subtotal: cart.reduce((sum, line) => sum + line.item_total, 0), discountPercent: 0, discountAmount: 0, total: 0, error: error.message }; }
-  }, [cart, discount, recordedFee]);
+  }, [cart, discount, recordedFee, agreedPrice, agreedPriceActive]);
+  const changeAgreedPrice = (value) => {
+    try {
+      const percent = discountForAgreedTotal(cart, value, recordedFee);
+      setDiscount(String(percent));
+      setAgreedPrice({ cart, value, error: "" });
+    } catch (error) {
+      setAgreedPrice({ cart, value, error: error.message });
+    }
+    dirty();
+  };
   const paymentCalculation = useMemo(() => {
     try { return { value: paymentConversion(totals.total, header), error: "" }; }
     catch (error) { return { value: null, error: error.message }; }
@@ -680,7 +695,7 @@ export default function PosPage() {
   const newOrder = () => {
     setMotorEnabled(false); setMotorProduct(null); setEditMotorPair(null); manualMotorContext.current = null;
     motorFxContext.current = { currency: "TRY", saved: false, pending: false };
-    setCart([]); setHeader({ ...EMPTY_HEADER }); setDiscount("0"); setRecordedFee(0); setExistingId(null); setSavedSale(null); setReviewed(false); closeProduct(); setTab("products");
+    setCart([]); setHeader({ ...EMPTY_HEADER }); setAgreedPrice(null); setDiscount("0"); setRecordedFee(0); setExistingId(null); setSavedSale(null); setReviewed(false); closeProduct(); setTab("products");
     restoredId.current = null; idempotencyKey.current = nextKey();
     paymentContext.current = { currency: "TRY", saved: false, pending: false }; setPaymentSaved(false);
     navigate("/dashboard/pos", { replace: true, state: null });
@@ -736,7 +751,7 @@ export default function PosPage() {
             {line.dual_plise && <p><strong>Çiftli plise {dualGroupIds.indexOf(line.dual_plise.group_id) + 1} · {line.dual_plise.role === "tul" ? "Tül" : "Güneşlik"}</strong>{line.dual_plise.case_color ? ` · Kasa: ${line.dual_plise.case_color}` : ""}</p>}
             {line.motor_system && <p><strong>Motorlu sistem {motorGroupIds.indexOf(line.motor_system.group_id) + 1} · {line.motor_system.role === "curtain" ? "Perde" : "Motor"}</strong></p>}
             {hasMechanicalPanels(line) ? <MechanicalDetails line={line} /> : <>{line.chain_direction && <p>{line.motor_system?.role === "curtain" ? "Motor yönü" : "Zincir / ip yönü"}: <strong>{line.chain_direction}</strong></p>}{line.mode === "fon" ? <p>{line.count} {line.order_mode === "takim" ? "takım" : "adet"} · {line.pieces} kanat · {line.panels.map((panel) => `${panel.label}: ${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm`).join(" / ")}</p> : line.width || line.height ? <p>En {formatNumber(line.width)} cm{!isRusticProduct(line) && <> · Boy {formatNumber(line.height)} cm</>}{line.mode === "textile" ? ` · ${line.pieces} parça` : ""}</p> : null}</>}
-            <p>{line.discount_display && <>Liste fiyatı: <del className="muted">{formatMoney(line.discount_display.original_unit_price)} / {line.unit_label}</del> · <strong>%{formatRate(line.discount_display.percent)} iskonto · Net birim fiyat</strong><br /></>}{line.mode === "fon" || line.mode === "textile" ? "Giden kumaş" : "Miktar"}: <strong>{formatNumber(line.quantity)} {line.unit_label}</strong> × {formatMoney(line.base_unit_price)} = {formatMoney(line.material_total)}</p>
+            <p>{line.discount_display && <>Liste fiyatı: <del className="muted">{formatMoney(line.discount_display.original_unit_price)} / {line.unit_label}</del> · <strong>{discountLabel(line.discount_display.percent)} iskonto · Net birim fiyat</strong><br /></>}{line.mode === "fon" || line.mode === "textile" ? "Giden kumaş" : "Miktar"}: <strong>{formatNumber(line.quantity)} {line.unit_label}</strong> × {formatMoney(line.base_unit_price)} = {formatMoney(line.material_total)}</p>
             {line.original_currency && line.original_currency !== "TRY" && <p className="muted">Siparişte kayıtlı kur: 1 {line.original_currency} = {formatExchangeRate(line.currency_rate)} ₺{line.currency_rate_source === "TCMB" && line.currency_rate_date ? ` · TCMB / ${formatRateDate(line.currency_rate_date)}` : " · Elle girilen kur"}</p>}
             {hasBillingDimensions(line) && <p className="muted">Hesap ölçüsü: {formatNumber(line.billable_width)} × {formatNumber(line.billable_height)} cm</p>}
             {(line.calc_type === "m2" || isRusticProduct(line)) && line.calculation_note && <p className="muted">{line.calculation_note}</p>}
@@ -745,7 +760,7 @@ export default function PosPage() {
             {line.item_note && <p className="muted">Not: {line.item_note}</p>}
             <div className="line-price"><span>{line.discount_display ? "Net tutar: " : ""}{formatMoney(line.item_total)}</span>{!locked && <div className="row"><button disabled={processing} onClick={() => editLine(cart.find((item) => item.id === line.id))}>{line.motor_system ? "Motorlu sistemi düzenle" : line.dual_plise ? "Çiftli sistemi düzenle" : "Düzenle"}</button><button className="button-danger" aria-label={`${line.product_name} kalemini kaldır`} disabled={processing} onClick={() => { setCart((previous) => previous.filter((item) => line.motor_system ? item.motor_system?.group_id !== line.motor_system.group_id : line.dual_plise ? item.dual_plise?.group_id !== line.dual_plise.group_id : item.id !== line.id)); dirty(); }}><Trash2 size={16} />{line.motor_system ? "Motorlu sistemi kaldır" : line.dual_plise ? "Çiftli sistemi kaldır" : "Kaldır"}</button></div>}</div>
           </article>)}</div>)}
-          {totals.discountPercent > 0 && <p className="muted">Birim fiyatlar ve kalem tutarları %{formatRate(totals.discountPercent)} iskonto uygulanmış net fiyatlardır. Kuruş yuvarlaması olabilir.</p>}
+          {totals.discountPercent > 0 && <p className="muted">Birim fiyatlar ve kalem tutarları {discountLabel(totals.discountPercent)} iskonto uygulanmış net fiyatlardır. Kuruş yuvarlaması olabilir.</p>}
           <div className="actions divider"><button disabled={processing || locked} onClick={() => setTab("products")}><ArrowLeft size={18} />Ürün eklemeye dön</button></div>
         </section>
         <section className="panel"><h2>Müşteri ve teslim bilgileri</h2><fieldset disabled={processing || locked}><div className="fields">
@@ -756,9 +771,9 @@ export default function PosPage() {
           <Field label="Ölçü durumu" full><select value={header.measurement_status || "preliminary"} onChange={(event) => updateHeader("measurement_status", event.target.value)}><option value="preliminary">Ön ölçü · yerinde teyit bekleniyor</option>{header.measurement_status === "scheduled" && <option value="scheduled" disabled>Ölçü randevusu planlandı</option>}<option value="confirmed">Ölçü teyit edildi</option></select><p className="muted">Ön ölçüyle de sipariş alabilirsiniz. Sonradan Ölçü / Teyit ekranından ustanın aldığı ölçüleri kaydedin.</p></Field>
           <Field label="Adres" full><textarea value={header.customer_address} onChange={(event) => updateHeader("customer_address", event.target.value)} autoComplete="street-address" maxLength={600} placeholder="Montaj / teslim adresi" /></Field>
         </div><p className="choice-label">Teslim şekli</p><div className="row"><button className="chip" aria-pressed={header.delivery_method === "magaza"} onClick={() => updateHeader("delivery_method", "magaza")}>Mağaza teslimi</button><button className="chip" aria-pressed={header.delivery_method === "montaj"} onClick={() => updateHeader("delivery_method", "montaj")}>Montaj</button></div>
-          <div className="fields divider"><NumberField label="İskonto oranı (%)" min={0} step="0.1" value={discount} onChange={(value) => { setDiscount(value); dirty(); }} /><Field label="Ödeme şekli"><select value={header.payment_method} onChange={(event) => updateHeader("payment_method", event.target.value)}><option>Nakit</option><option>Kredi Kartı</option><option>Havale / EFT</option></select></Field><Field label="Sipariş notu" full><textarea value={header.sale_note} maxLength={1000} onChange={(event) => updateHeader("sale_note", event.target.value)} placeholder="Müşteri / imalat için sipariş notu" /></Field></div>
+          <div className="fields divider"><NumberField label="İskonto oranı (%)" min={0} step="any" value={agreedPrice ? discountPercentInput(discount) : discount} onChange={(value) => { setAgreedPrice(null); setDiscount(value); dirty(); }} /><Field label="Anlaşılan toplam tutar (₺)"><input type="number" inputMode="decimal" min={recordedFee} step="0.01" value={agreedPriceActive ? agreedPrice.value : totals.error ? "" : totals.total} onChange={(event) => changeAgreedPrice(event.target.value)} /><p className="muted">Tutar girince iskonto otomatik hesaplanır. Oran yaklaşık gösterilse de girilen toplam tutar korunur.</p></Field><Field label="Ödeme şekli"><select value={header.payment_method} onChange={(event) => updateHeader("payment_method", event.target.value)}><option>Nakit</option><option>Kredi Kartı</option><option>Havale / EFT</option></select></Field><Field label="Sipariş notu" full><textarea value={header.sale_note} maxLength={1000} onChange={(event) => updateHeader("sale_note", event.target.value)} placeholder="Müşteri / imalat için sipariş notu" /></Field></div>
         </fieldset>
-          <div className="price-box"><div className="total-row"><span>{totals.discountPercent > 0 ? "İskonto öncesi toplam" : "Ara toplam"}</span><strong>{formatMoney(totals.subtotal)}</strong></div><div className="total-row"><span>İskonto (%{totals.discountPercent})</span><strong>− {formatMoney(totals.discountAmount)}</strong></div>{recordedFee > 0 && <div className="total-row"><span>Kayıtlı ödeme farkı</span><strong>{formatMoney(recordedFee)}</strong></div>}<div className="total-row grand-total"><span>Ödenecek</span><span>{formatMoney(totals.total)}</span></div>{totals.error && <p className="error" role="alert">{totals.error}</p>}</div>
+          <div className="price-box"><div className="total-row"><span>{totals.discountPercent > 0 ? "İskonto öncesi toplam" : "Ara toplam"}</span><strong>{formatMoney(totals.subtotal)}</strong></div><div className="total-row"><span>İskonto ({discountLabel(totals.discountPercent)})</span><strong>− {formatMoney(totals.discountAmount)}</strong></div>{recordedFee > 0 && <div className="total-row"><span>Kayıtlı ödeme farkı</span><strong>{formatMoney(recordedFee)}</strong></div>}<div className="total-row grand-total"><span>Ödenecek</span><span>{formatMoney(totals.total)}</span></div>{totals.error && <p className="error" role="alert">{totals.error}</p>}</div>
           <fieldset className="review-card" disabled={processing || locked}>
             <h3>Döviz ödeme karşılığı</h3>
             <Field label="Ödeme para birimi"><select value={header.payment_currency || "TRY"} onChange={(event) => selectPaymentCurrency(event.target.value)}><option value="TRY">Türk lirası · TRY</option><option value="EUR">Euro · EUR</option><option value="USD">ABD doları · USD</option></select></Field>
@@ -776,7 +791,7 @@ export default function PosPage() {
           </fieldset>
         </section>
       </div>
-      {reviewed && <div className="review-card" role="status"><strong>{header.first_name} {header.last_name}</strong> · İletişim: {header.customer_phone || "Belirtilmedi"} · Teslim: {header.delivery_date} · {header.delivery_method === "montaj" ? "Montaj" : "Mağaza teslimi"}<p>{cart.length} ürün kalemi / {rooms.length} oda · İskonto %{totals.discountPercent} ({formatMoney(totals.discountAmount)}) · Ödenecek {formatMoney(totals.total)}</p></div>}
+      {reviewed && <div className="review-card" role="status"><strong>{header.first_name} {header.last_name}</strong> · İletişim: {header.customer_phone || "Belirtilmedi"} · Teslim: {header.delivery_date} · {header.delivery_method === "montaj" ? "Montaj" : "Mağaza teslimi"}<p>{cart.length} ürün kalemi / {rooms.length} oda · İskonto {discountLabel(totals.discountPercent)} ({formatMoney(totals.discountAmount)}) · Ödenecek {formatMoney(totals.total)}</p></div>}
       <div className="actions divider">
         <button disabled={!cart.length || processing || locked} onClick={() => { if (validateHeader()) setReviewed(true); }}><ClipboardList size={18} />Siparişi gözden geçir</button>
         <button disabled={!cart.length || processing || locked} onClick={() => saveOrder("beklemede")}>{processing ? <Loader2 className="spin" size={18} /> : null}Beklemede</button>
