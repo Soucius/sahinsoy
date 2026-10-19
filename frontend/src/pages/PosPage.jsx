@@ -445,12 +445,14 @@ export default function PosPage() {
   const openProduct = async (product) => {
     if (locked || processing) return;
     const request = ++selectionRequest.current;
-    if (isRusticSizeCandidate(product)) {
+    if (isRusticSizeCandidate(product) || hasRusticSizePrices(product)) {
       try {
         const response = await api.get("/products", { params: { search: rusticFamilyName(product).split(" · ")[0], brand: product.product_brand?._id || "", limit: 3000 } });
         if (request !== selectionRequest.current) return;
         if (response.data.totalProducts > response.data.products?.length) throw new Error("Rustik fiyat listesi eksik yüklendi. Aramayı daraltın.");
-        product = prepareRusticSizeProduct(product, response.data.products || []);
+        const fullProduct = response.data.products?.find((item) => item._id === product._id);
+        if (!fullProduct) throw new Error("Rustik ürün katalogda bulunamadı.");
+        product = prepareRusticSizeProduct(fullProduct, response.data.products || []);
       } catch (error) { if (request === selectionRequest.current) toast.error(error.message || "Rustik ölçü fiyatları yüklenemedi."); return; }
     }
     if (isObaFoldingProduct(product)) {
