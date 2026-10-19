@@ -149,7 +149,7 @@ function priceAccessories(line, revised, metadata) {
     let quantity = revised.quantity;
     if (basis === "adet") quantity = scope === "kasa" ? (revised.case_count ?? revised.count) : revised.pieces;
     if (basis === "mt") quantity = ["textile", "fon"].includes(revised.mode) ? revised.quantity : revised.width / 100 * (revised.mechanical_panels?.length ? revised.count : revised.pieces);
-    if (basis === "m2") quantity = revised.calc_type === "m2" ? revised.quantity : revised.width * revised.height / 10000 * revised.pieces;
+    if (basis === "m2") quantity = revised.calc_type === "m2" ? revised.quantity : revised.mechanical_panels?.length ? revised.mechanical_panels.reduce((sum, panel) => sum + panel.width * panel.height / 10000, 0) * revised.count : revised.width * revised.height / 10000 * revised.pieces;
     quantity *= multiplier;
     return { ...copy(saved), pricing_basis: basis, pricing_scope: scope, quantity: roundQuantity(quantity), unit_price: unitPrice, total: roundMoney(quantity * unitPrice) };
   });
@@ -210,7 +210,11 @@ function reviseLine(line, measurement, product) {
   const revised = copy(line);
   for (const key of geometryFields) if (has(calculated, key)) revised[key] = calculated[key];
   revised.panels = calculated.panels.map((panel, index) => ({ ...(line.panels?.[index] || {}), width: panel.width, height: panel.height, cut_width: panel.cut_width }));
-  if (shape.panels) revised.mechanical_panels = calculated.mechanical_panels.map((panel, index) => ({ ...copy(line.mechanical_panels[index]), width: panel.width, height: panel.height, billable_width: panel.billable_width, billable_height: panel.billable_height, billable_area: panel.billable_area }));
+  if (shape.panels) revised.mechanical_panels = calculated.mechanical_panels.map((panel, index) => {
+    const dimensions = { width: panel.width, height: panel.height, billable_width: panel.billable_width, billable_height: panel.billable_height };
+    for (const key of ["billable_area", "billable_length"]) if (has(panel, key)) dimensions[key] = panel[key];
+    return { ...copy(line.mechanical_panels[index]), ...dimensions };
+  });
   revised.accessories = calculated.accessories;
   revised.pricing_snapshot = { ...copy(line.pricing_snapshot || {}), ...rules, extra_options: options };
   return revised;
