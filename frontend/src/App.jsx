@@ -15,6 +15,7 @@ import ProductsPage from "./pages/ProductsPage";
 import PosPage from "./pages/PosPage";
 import CategoriesPage from "./pages/CategoriesPage";
 import SalesPage from "./pages/SalesPage";
+import SalePaymentsPage from "./pages/SalePaymentsPage.jsx";
 import SaleMeasurementPage from "./pages/SaleMeasurementPage";
 
 function App() {
@@ -37,6 +38,7 @@ function App() {
             <Route path="pos" element={<PosPage />} />
             <Route path="categories" element={<CategoriesPage />} />
             <Route path="sales" element={<SalesPage />} />
+            <Route path="sales/:id/payments" element={<SalePaymentsPage />} />
             <Route path="sales/:id/measurements" element={<SaleMeasurementPage />} />
           </Route>
         </Route>
