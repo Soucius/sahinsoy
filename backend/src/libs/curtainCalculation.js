@@ -29,6 +29,12 @@ export function needsControlDirection(product) {
   return productMode(product) === "mechanical" && /stor|zebra|jaluzi/.test(category);
 }
 
+export function supportsFoldingPanels(product) {
+  return product?.calculation_type === "mt"
+    && normalizeName(product.product_category?.category_name || product.category_name) === "katlama sistemi"
+    && /5\s*\+\s*1(?!\d)/.test(product.product_name || "");
+}
+
 export function mechanicalPanelPosition(index, count) {
   if (count === 1) return "Tek parça";
   if (index === 0) return "Sol";
@@ -43,7 +49,7 @@ export function defaultMeasurement(product) {
     width: product.fixed_dimensions?.width_cm ? String(product.fixed_dimensions.width_cm) : mode === "fon" ? "80" : "", height: product.fixed_dimensions?.height_cm ? String(product.fixed_dimensions.height_cm) : mode === "standard" ? "" : "260", count: "1", order_mode: mode === "fon" ? "takim" : "adet",
     right_width: "80", right_height: "260", separate_right: false, pleat_id: "sik", labor_price: "0", currency_rate: "",
     ...(needsControlDirection(product) ? { chain_direction: "" } : {}),
-    ...(needsControlDirection(product) && product.calculation_type === "m2" ? { case_mode: "ayri", mechanical_panels: [], profile_width_cm: "" } : {}),
+    ...(supportsFoldingPanels(product) || needsControlDirection(product) && product.calculation_type === "m2" ? { case_mode: "ayri", mechanical_panels: [], profile_width_cm: "" } : {}),
     extra_indices: [], accessory_colors: {}, accessory_counts: {},
   };
 }
@@ -172,7 +178,7 @@ export function calculateCurtainLine(product, form) {
   const accessoryColors = parseAccessoryColors(form.accessory_colors);
   const accessoryCounts = parseAccessoryCounts(form.accessory_counts);
   const requiresDirection = needsControlDirection(product);
-  const supportsPanels = requiresDirection && type === "m2";
+  const supportsPanels = supportsFoldingPanels(product) || requiresDirection && type === "m2";
   const caseMode = form.case_mode || "ayri";
   if (!["ayri", "ortak"].includes(caseMode) || (caseMode === "ortak" && !supportsPanels)) throw new Error("Kasa düzenini seçin.");
   if (form.mechanical_panels !== undefined && (!Array.isArray(form.mechanical_panels) || form.mechanical_panels.length > 1000)) throw new Error("Parça ölçülerini kontrol edin.");
@@ -261,9 +267,34 @@ export function calculateCurtainLine(product, form) {
   } else if (type === "mt") {
     const minimumWidth = nonnegative(product.min_width_cm, "Minimum fiyatlandırma eni");
     const dimensionStep = nonnegative(product.dimension_rounding_cm, "Ölçü yuvarlama adımı");
-    billableWidth = roundDimension(width, minimumWidth, dimensionStep);
-    quantity = billableWidth / 100 * count;
-    note = `${count} adet × ${formatNumber(billableWidth / 100)} m${minimumWidth || dimensionStep ? ` · fiyatlandırma eni ${formatNumber(billableWidth)} cm` : ""}${dimensionStep ? ` · en ${formatNumber(dimensionStep, 0)} cm adımına yuvarlanır` : ""}`;
+    if (hasMechanicalPanels) {
+      mechanicalPanels = form.mechanical_panels.map((panel, index) => {
+        if (!panel || typeof panel !== "object" || Array.isArray(panel)) throw new Error(`${index + 1}. parçanın ölçülerini girin.`);
+        const panelWidth = positive(panel.width, `${index + 1}. parça eni`);
+        const panelHeight = positive(panel.height, `${index + 1}. parça boyu`);
+        validateProductDimensions(product, panelWidth, panelHeight);
+        const positionOverride = panel.position_override ?? "";
+        if (!["", "Sol", "Orta", "Sağ"].includes(positionOverride)) throw new Error(`${index + 1}. parçanın konumunu seçin.`);
+        const direction = panel.chain_direction ?? "";
+        if (!["", "Sağ", "Sol"].includes(direction)) throw new Error(`${index + 1}. parçanın yönünü kontrol edin.`);
+        const variant = String(panel.variant || form.variant || "").trim();
+        if (variant.length > 150) throw new Error(`${index + 1}. parçanın renk / VR bilgisi çok uzun.`);
+        const billedWidth = roundDimension(panelWidth, minimumWidth, dimensionStep);
+        return { label: `${index + 1}. Parça`, position: positionOverride || mechanicalPanelPosition(index, form.mechanical_panels.length), position_override: positionOverride, width: panelWidth, height: panelHeight, chain_direction: direction, variant, billable_width: billedWidth, billable_height: panelHeight, billable_length: roundQuantity(billedWidth / 100) };
+      });
+      width = roundQuantity(mechanicalPanels.reduce((sum, panel) => sum + panel.width, 0));
+      height = Math.max(...mechanicalPanels.map((panel) => panel.height));
+      billableWidth = roundQuantity(mechanicalPanels.reduce((sum, panel) => sum + panel.billable_width, 0));
+      billableHeight = height;
+      pieces = count * mechanicalPanels.length;
+      caseCount = caseMode === "ortak" ? count : pieces;
+      quantity = mechanicalPanels.reduce((sum, panel) => sum + panel.billable_length, 0) * count;
+      note = `${count} düzen × ${mechanicalPanels.length} parça · ${caseCount} ${caseMode === "ortak" ? "ortak" : "ayrı"} kasa · her parça eni ayrı hesaplanır · toplam gerçek en ${formatNumber(width)} cm${minimumWidth ? ` · minimum en ${formatNumber(minimumWidth)} cm / parça` : ""}${dimensionStep ? ` · en ${formatNumber(dimensionStep, 0)} cm adımına yuvarlanır` : ""}`;
+    } else {
+      billableWidth = roundDimension(width, minimumWidth, dimensionStep);
+      quantity = billableWidth / 100 * count;
+      note = `${count} adet × ${formatNumber(billableWidth / 100)} m${minimumWidth || dimensionStep ? ` · fiyatlandırma eni ${formatNumber(billableWidth)} cm` : ""}${dimensionStep ? ` · en ${formatNumber(dimensionStep, 0)} cm adımına yuvarlanır` : ""}`;
+    }
   }
   quantity = roundQuantity(quantity);
   const laborPrice = mode === "textile" || mode === "fon" ? nonnegative(form.labor_price, "Metre işçilik fiyatı") : 0;
@@ -286,7 +317,7 @@ export function calculateCurtainLine(product, form) {
     let optionQuantity = quantity;
     if (basis === "adet") optionQuantity = option.pricing_scope === "kasa" ? caseCount : pieces;
     if (basis === "mt") optionQuantity = mode === "fon" || mode === "textile" ? quantity : width / 100 * (hasMechanicalPanels ? count : pieces);
-    if (basis === "m2") optionQuantity = type === "m2" ? quantity : width * height / 10000 * pieces;
+    if (basis === "m2") optionQuantity = type === "m2" ? quantity : hasMechanicalPanels ? mechanicalPanels.reduce((sum, panel) => sum + panel.width * panel.height / 10000, 0) * count : width * height / 10000 * pieces;
     optionQuantity *= countPerPiece;
     const optionCurrency = option.currency || currency;
     const optionRate = optionCurrency === "TRY" ? 1 : rate;
@@ -339,7 +370,7 @@ export function salePayload(cart, header, percent, status, existingIdempotencyKe
   const computed = orderTotals(cart, percent);
   const totals = { ...computed, total: roundMoney(computed.total + fee) };
   const payment = paymentConversion(totals.total, header);
-  const panelNote = (line) => line.mechanical_panels?.length ? [`${line.case_count} ${line.case_mode === "ortak" ? "ortak" : "ayrı"} kasa · ${line.pieces} parça`, ...line.mechanical_panels.map((panel) => `${panel.label}${panel.position ? ` (${panel.position})` : ""}: ${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm${panel.variant ? ` · Renk / VR: ${panel.variant}` : ""} · ${line.motor_system?.role === "curtain" ? "Motor yönü" : "Zincir / ip yönü"}: ${panel.chain_direction}`)].join(" / ") : "";
+  const panelNote = (line) => line.mechanical_panels?.length ? [`${line.case_count} ${line.case_mode === "ortak" ? "ortak" : "ayrı"} kasa · ${line.pieces} parça`, ...line.mechanical_panels.map((panel) => `${panel.label}${panel.position ? ` (${panel.position})` : ""}: ${formatNumber(panel.width)} × ${formatNumber(panel.height)} cm${panel.variant ? ` · Renk / VR: ${panel.variant}` : ""}${panel.chain_direction ? ` · ${line.motor_system?.role === "curtain" ? "Motor yönü" : "Zincir / ip yönü"}: ${panel.chain_direction}` : ""}`)].join(" / ") : "";
   const accessoryNote = (line) => {
     const colors = accessoryColorsFromLine(line), counts = accessoryCountsFromLine(line);
     return (line.accessories || []).filter((option) => Object.hasOwn(colors, option.name) || Object.hasOwn(counts, option.name))
