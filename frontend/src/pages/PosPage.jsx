@@ -15,6 +15,7 @@ import HemAccessories from "../components/HemAccessories.jsx";
 import FoldingRodOptions from "../components/FoldingRodOptions.jsx";
 import { foldingRodOption, prepareObaFoldingProduct, setFoldingRodCount } from "../libs/foldingRods.js";
 import { hemAccessoryError, hemAccessoryOptions, normalizeHemForMechanism, selectHemAccessory } from "../libs/hemAccessories.js";
+import { labelFacadeLines, nextFacadeMeasurement } from "../libs/facadeEntry.js";
 import { isAutomationCategoryName } from "../../../backend/src/libs/posCatalogGroup.js";
 
 const EMPTY_HEADER = { first_name: "", last_name: "", customer_phone: "", customer_address: "", delivery_date: "", delivery_method: "", payment_method: "Nakit", sale_note: "", measurement_status: "preliminary", payment_currency: "TRY", payment_currency_rate: "", payment_rate_mode: "automatic", payment_rate_source: "Harem", payment_rate_type: null, payment_rate_date: null, payment_rate_fetched_at: null, payment_rate_quoted_at: null };
@@ -554,32 +555,48 @@ export default function PosPage() {
     } catch (error) { if (request === selectionRequest.current) toast.error(error.message || "Ürün düzenlenemedi."); }
   };
 
-  const addLine = () => {
+  const finishProductAddition = (updatedCart, keepOpen) => {
+    if (!keepOpen) { closeProduct(); return; }
+    selectionRequest.current += 1;
+    setEditId(null); setEditDualPair(null); setEditMotorPair(null);
+    setMotorEnabled(false); setMotorProduct(null); setMotorRateForm({}); setMotorFxSaved(false);
+    manualMotorContext.current = null; motorFxContext.current = { currency: "TRY", saved: false, pending: false };
+    setDualEnabled(false); setSecondaryProduct(null); setDualProducts([]); setLegacyDualHeights(null);
+    setBatchEnabled(supportsMeasurementBatch(selected));
+    setBatchRows([{ ...createMeasurementRow(), key: nextKey() }]); setBatchTarget("1");
+    setMeasurement(builderForm(selected, nextFacadeMeasurement(selected, measurement, updatedCart)));
+    setWizardStep(1);
+    toast.success("Cam eklendi. Aynı odadaki yeni camın cephesini ve ölçülerini girin.");
+  };
+
+  const addLine = (continueWithNextFacade = false) => {
+    const keepOpen = continueWithNextFacade === true && !editId && !editDualPair && !editMotorPair;
+    const labelLines = (lines) => keepOpen ? labelFacadeLines(lines, cart, measurement.room_name) : lines;
     if (locked || processing) return;
     if (!measurement.room_name.trim()) { toast.error("Oda / bölüm adını girin."); return; }
     if (motorEnabled || editMotorPair) {
       if (motorEnabled ? !motorCalculation?.value : !calculation?.line) { toast.error(motorEnabled ? motorCalculation?.error : calculation?.error); return; }
-      const lines = motorEnabled ? motorCalculation.value.lines.map((line) => {
+      const lines = labelLines(motorEnabled ? motorCalculation.value.lines.map((line) => {
         const saved = editMotorPair?.find((item) => item.motor_system.role === line.motor_system.role);
         return { ...line, id: saved?.id || (line.motor_system.role === "curtain" && editId ? editId : line.id), motor_system: { ...line.motor_system, group_id: editMotorPair?.[0].motor_system.group_id || line.motor_system.group_id } };
-      }) : [{ ...calculation.line, id: editId || nextKey() }];
+      }) : [{ ...calculation.line, id: editId || nextKey() }]);
       if (retainedCartCount + lines.length > 1000) { toast.error("Bir siparişte en fazla 1000 ürün kalemi bulunabilir."); return; }
       const removed = new Set(editMotorPair?.map((item) => item.id) || (editId ? [editId] : []));
       const position = cart.findIndex((item) => removed.has(item.id));
       const updated = cart.filter((item) => !removed.has(item.id));
       updated.splice(position < 0 ? updated.length : position, 0, ...lines);
       try { validateMotorSystemGroups(updated); validateDualPliseGroups(updated); } catch (error) { toast.error(error.message); return; }
-      setCart(updated); lastRoom.current = measurement.room_name.trim(); dirty(); closeProduct();
-      toast.success(editId ? "Motorlu sistem güncellendi." : "Motorlu perde siparişe eklendi.");
+      setCart(updated); lastRoom.current = measurement.room_name.trim(); dirty(); finishProductAddition(updated, keepOpen);
+      if (!keepOpen) toast.success(editId ? "Motorlu sistem güncellendi." : "Motorlu perde siparişe eklendi.");
       return;
     }
     if (batchActive) {
       if (!batchCalculation?.value) { toast.error(batchCalculation?.error || "Ölçü satırlarını kontrol edin."); return; }
       if (retainedCartCount + batchCalculation.value.lines.length > 1000) { toast.error("Bir siparişte toplam en fazla 1000 kumaş / ürün kalemi bulunabilir."); return; }
-      const lines = batchCalculation.value.lines.map((line) => {
+      const lines = labelLines(batchCalculation.value.lines.map((line) => {
         const saved = editDualPair?.find((item) => item.dual_plise.role === line.dual_plise?.role);
         return saved ? { ...line, id: saved.id, dual_plise: { ...line.dual_plise, group_id: saved.dual_plise.group_id } } : { ...line, id: line.id || nextKey() };
-      });
+      }));
       // An edited pair must stay one physical system; new systems use new rows.
       if (editDualPair && batchRows.length !== 1) { toast.error("Bu çiftli sistemi düzenleyin; diğer camları yeni ürün olarak ekleyin."); return; }
       const removed = new Set(editDualPair?.map((item) => item.id) || (editId ? [editId] : []));
@@ -590,18 +607,19 @@ export default function PosPage() {
       setCart(updated);
       lastRoom.current = measurement.room_name.trim();
       dirty();
-      closeProduct();
-      toast.success(editDualPair || editId ? "Ölçüler güncellendi." : dualActive ? `${batchCalculation.value.pieces} çiftli sistem siparişe eklendi.` : `${lines.length} ölçü satırı / ${batchCalculation.value.pieces} adet siparişe eklendi.`);
+      finishProductAddition(updated, keepOpen);
+      if (!keepOpen) toast.success(editDualPair || editId ? "Ölçüler güncellendi." : dualActive ? `${batchCalculation.value.pieces} çiftli sistem siparişe eklendi.` : `${lines.length} ölçü satırı / ${batchCalculation.value.pieces} adet siparişe eklendi.`);
       return;
     }
     if (!calculation?.line) { toast.error(calculation?.error || "Ölçüleri kontrol edin."); return; }
     if (!editId && cart.length >= 1000) { toast.error("Bir siparişte toplam en fazla 1000 ölçü satırı bulunabilir."); return; }
-    const line = { ...calculation.line, id: editId || nextKey() };
-    setCart((previous) => editId ? previous.map((item) => item.id === editId ? line : item) : [...previous, line]);
+    const [line] = labelLines([{ ...calculation.line, id: editId || nextKey() }]);
+    const updated = editId ? cart.map((item) => item.id === editId ? line : item) : [...cart, line];
+    setCart(updated);
     lastRoom.current = line.room_name;
     dirty();
-    closeProduct();
-    toast.success(editId ? "Ürün ölçüleri güncellendi." : "Ürün siparişe eklendi.");
+    finishProductAddition(updated, keepOpen);
+    if (!keepOpen) toast.success(editId ? "Ürün ölçüleri güncellendi." : "Ürün siparişe eklendi.");
   };
 
   const validateHeader = () => {
@@ -771,7 +789,7 @@ export default function PosPage() {
         </div>
         <div className="fields divider"><Field label="Oda / bölüm adı"><input value={measurement.room_name} onChange={(event) => updateMeasurement("room_name", event.target.value)} placeholder="Oda seçin veya kendi oda adınızı yazın" maxLength={100} aria-describedby="pos-room-name-hint" disabled={locked || processing} /></Field><Field label="Bölüm / cam adı (isteğe bağlı)"><input value={measurement.area} maxLength={100} onChange={(event) => updateMeasurement("area", event.target.value)} placeholder="Örn. balkon kapısı" /></Field></div>
         <p id="pos-room-name-hint" className="muted">İstediğiniz kadar oda ekleyebilirsiniz. Örn. Yatak Odası 2, Çocuk Odası 2. Eklediğiniz oda adları sonraki ürünlerde tekrar seçilebilir.</p>
-        <p className="choice-label">Hangi cephe? <span className="muted">İsteğe bağlı</span></p><div className="row">{FACADES.map((facade) => <button key={facade} className="chip" aria-pressed={measurement.facade === facade} onClick={() => updateMeasurement("facade", measurement.facade === facade ? "" : facade)}>{facade}</button>)}</div><p className="choice-label">Hangi pencere? <span className="muted">İsteğe bağlı</span></p><div className="row">{WINDOWS.map((windowName) => <button key={windowName} className="chip" aria-pressed={measurement.window_name === windowName} onClick={() => updateMeasurement("window_name", measurement.window_name === windowName ? "" : windowName)}>{windowName}</button>)}</div><p className="muted divider">Her cepheyi ayrı ürün kalemi olarak ekleyebilirsiniz. Oda ve ürün kalemi sayısında sınır yok.</p><div className="actions divider"><button onClick={closeProduct}>İptal</button><button className="primary" onClick={() => { if (!measurement.room_name.trim()) toast.error("Oda / bölüm adını girin."); else setWizardStep(2); }}>İleri<ArrowRight size={18} /></button></div>
+        <p className="choice-label">Hangi cephe? <span className="muted">İsteğe bağlı</span></p><div className="row">{FACADES.map((facade) => <button key={facade} className="chip" aria-pressed={measurement.facade === facade} onClick={() => updateMeasurement("facade", measurement.facade === facade ? "" : facade)}>{facade}</button>)}</div><p className="choice-label">Hangi pencere? <span className="muted">İsteğe bağlı</span></p><div className="row">{WINDOWS.map((windowName) => <button key={windowName} className="chip" aria-pressed={measurement.window_name === windowName} onClick={() => updateMeasurement("window_name", measurement.window_name === windowName ? "" : windowName)}>{windowName}</button>)}</div><p className="muted divider">Her camı ayrı bölüm olarak ekleyebilirsiniz. Ölçü adımındaki “Ekle ve yeni cephe aç” ile aynı ürünü bu odanın diğer camlarına ekleyin. Her oda için kullanılabilir.</p><div className="actions divider"><button onClick={closeProduct}>İptal</button><button className="primary" onClick={() => { if (!measurement.room_name.trim()) toast.error("Oda / bölüm adını girin."); else setWizardStep(2); }}>İleri<ArrowRight size={18} /></button></div>
       </> : <>
         {motorAvailable && <div className="review-card"><h3>Kullanım şekli</h3><div role="group" aria-label="Kullanım şekli" className="row"><button type="button" className="chip" aria-pressed={!motorEnabled} onClick={() => changeMotorMode(false)}>Manuel</button><button type="button" className="chip" aria-pressed={motorEnabled} disabled={motorCatalogLoading || Boolean(motorCatalogError)} onClick={() => changeMotorMode(true)}>Motorlu</button></div><p className="muted">{motorEnabled ? "Her perde parçasına bir motor eklenir. Manuel mekanizma ve redüktör farkları uygulanmaz." : "Motorlu seçerseniz ölçüye uygun motorları aşağıdan seçebilirsiniz."}</p>{motorCatalogLoading && <p className="muted">Motor ve mekanizma listesi yükleniyor…</p>}{motorCatalogError && <p className="error">{motorCatalogError} <button type="button" onClick={() => setMotorCatalogRefresh((value) => value + 1)}>Yeniden dene</button></p>}</div>}
         {dualRole && <div className="review-card"><label className="check"><input type="checkbox" checked={dualActive} disabled={Boolean(editDualPair)} onChange={toggleDual} />Çiftli sisteme çevir · tül + güneşlik</label>{dualActive && <><p className="muted">İlk ürün: {selected.product_name} · {primaryRoleLabel}. İkinci kumaşı aşağıdan seçin. En ve boy bir kez girilir, iki kumaşa da uygulanır. Her kumaş kendi fiyatı ve minimum 1 m² kuralıyla hesaplanır.</p><Field label={`İkinci kumaş · ${secondaryRoleLabel}`}><select value={secondaryProduct?._id || ""} disabled={dualLoading || Boolean(editDualPair)} onChange={(event) => setSecondaryProduct(dualProducts.find((product) => product._id === event.target.value) || null)}><option value="">{dualLoading ? "Ürünler yükleniyor…" : "Seri seçin"}</option>{[...dualProducts, ...(secondaryProduct && !dualProducts.some((product) => product._id === secondaryProduct._id) ? [secondaryProduct] : [])].map((product) => <option key={product._id} value={product._id}>{product.product_name} · {formatMoney(product.sale_price)} / m²</option>)}</select></Field>{dualError && <p className="error">{dualError} <button type="button" onClick={() => setDualRefresh((value) => value + 1)}>Yeniden dene</button></p>}<p className="muted">Aynı cam için tek en, tek boy ve kasa rengi seçilir. İki kumaşın renk / VR seçimleri ayrıdır. Ek çiftli mekanizma ücreti uygulanmaz.</p></>}</div>}
@@ -840,7 +858,7 @@ export default function PosPage() {
         {!dualActive && selected.extra_options?.some((option) => option.pricing_basis === "mt" || option.calculation_type === "mt") && <p className="muted">Metreli aksesuarlar gerçek en üzerinden hesaplanır.</p>}
         <Field label="Ürün / imalat notu" full><textarea maxLength={500} value={measurement.item_note} onChange={(event) => updateMeasurement("item_note", event.target.value)} placeholder="Örn. etek modeli, kasa rengi…" /></Field>
         <div className="price-box" aria-live="polite">{motorEnabled ? (motorCalculation?.value ? <><p>Perde ve aksesuarlar: <strong>{formatMoney(motorCalculation.value.curtain.item_total)}</strong></p><p>{motorCalculation.value.motorCount} motor × {formatMoney(motorCalculation.value.motor.base_unit_price)} = <strong>{formatMoney(motorCalculation.value.motor.item_total)}</strong></p><p className="big">{formatMoney(motorCalculation.value.total)}</p><p className="muted">Motor ve perde birlikte siparişe eklenecek.</p></> : <p className="error">{motorCalculation?.error}</p>) : batchActive ? (batchCalculation?.value ? <><p><strong>{batchRows.length} ölçü satırı · {batchCalculation.value.pieces} adet</strong></p><p>Toplam hesaplanan miktar: <strong>{formatNumber(batchCalculation.value.quantity)} m²</strong></p><p className="big">{formatMoney(batchCalculation.value.total)}</p><p className="muted">Her camın fiyatı kendi ölçüsü ve adedine göre ayrı hesaplandı.</p></> : <p className="error">{batchCalculation?.error}</p>) : calculation?.line ? <><MechanicalDetails line={calculation.line} /><p>{mode === "fon" || mode === "textile" ? "Giden kumaş" : "Hesaplanan miktar"}: <strong>{formatNumber(calculation.line.quantity)} {calculation.line.unit_label}</strong>{mode === "fon" ? ` · ${calculation.line.pieces} kanat` : ""}</p>{hasBillingDimensions(calculation.line) && <p>Hesap ölçüsü: {formatNumber(calculation.line.billable_width)} × {formatNumber(calculation.line.billable_height)} cm</p>}<p>{formatNumber(calculation.line.quantity)} {calculation.line.unit_label} × {formatMoney(calculation.line.base_unit_price)} = {formatMoney(calculation.line.material_total)}</p>{calculation.line.labor_total > 0 && <p>İşçilik: {formatNumber(calculation.line.quantity)} m × {formatMoney(calculation.line.labor_unit_price)} = {formatMoney(calculation.line.labor_total)}</p>}{calculation.line.accessories_total > 0 && <p>Aksesuarlar: {formatMoney(calculation.line.accessories_total)}</p>}<p className="muted">{calculation.line.calculation_note}</p><p className="big">{formatMoney(calculation.line.item_total)}</p></> : <p className="error">{calculation?.error}</p>}</div>
-        <div className="actions"><button onClick={() => setWizardStep(1)}><ArrowLeft size={18} />Geri</button><button className="primary" disabled={(motorEnabled ? !motorCalculation?.value : batchActive ? !batchCalculation?.value : !calculation?.line) || locked || processing} onClick={addLine}><Plus size={18} />{editId || editDualPair || editMotorPair ? "Değişiklikleri kaydet" : batchActive ? "Tüm ölçüleri siparişe ekle" : "Siparişe ekle"}</button></div>
+        <div className="actions"><button onClick={() => setWizardStep(1)}><ArrowLeft size={18} />Geri</button>{!editId && !editDualPair && !editMotorPair && <button disabled={(motorEnabled ? !motorCalculation?.value : batchActive ? !batchCalculation?.value : !calculation?.line) || locked || processing} onClick={() => addLine(true)}><Plus size={18} />Ekle ve yeni cephe aç</button>}<button className="primary" disabled={(motorEnabled ? !motorCalculation?.value : batchActive ? !batchCalculation?.value : !calculation?.line) || locked || processing} onClick={() => addLine()}><Plus size={18} />{editId || editDualPair || editMotorPair ? "Değişiklikleri kaydet" : batchActive ? "Tüm ölçüleri siparişe ekle" : "Siparişe ekle"}</button></div>
       </>}
     </section></div>}
   </div>;
