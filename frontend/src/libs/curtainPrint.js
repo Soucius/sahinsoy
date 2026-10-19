@@ -1,4 +1,4 @@
-import { formatMoney, formatNumber, mechanicalPanelPosition, orderTotals, paymentConversion, productMode, restoreSaleDraft, showFabricSpecs } from "./curtainCalculation.js";
+import { formatMoney, formatNumber, mechanicalPanelPosition, needsControlDirection, orderTotals, paymentConversion, productMode, restoreSaleDraft, showFabricSpecs } from "./curtainCalculation.js";
 
 export function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
@@ -88,17 +88,19 @@ function dualPliseDetails(dual) {
 }
 
 function billingDetail(line) {
-  if (line.calc_type !== "m2") return "";
-  const changed = !mechanicalParts(line) && Number.isFinite(line.billable_width) && Number.isFinite(line.billable_height) && (line.billable_width !== line.width || line.billable_height !== line.height);
-  return `${changed ? `<div class="detail">Hesap ölçüsü: ${number(line.billable_width)} × ${number(line.billable_height)} cm</div>` : ""}${line.calculation_note ? `<div class="detail">${safe(line.calculation_note)}</div>` : ""}`;
+  if (line.calc_type !== "m2" && !(line.calc_type === "mt" && line.mode === "mechanical")) return "";
+  const changed = !mechanicalParts(line) && Number.isFinite(line.billable_width) && (line.calc_type === "mt" ? line.billable_width !== line.width : Number.isFinite(line.billable_height) && (line.billable_width !== line.width || line.billable_height !== line.height));
+  return `${changed ? `<div class="detail">${line.calc_type === "mt" ? `Hesap eni: ${number(line.billable_width)} cm` : `Hesap ölçüsü: ${number(line.billable_width)} × ${number(line.billable_height)} cm`}</div>` : ""}${line.calculation_note ? `<div class="detail">${safe(line.calculation_note)}</div>` : ""}`;
 }
 
 function mechanicalPartDetails(panel, line, includeBilling = false) {
   const variant = panel.variant || line.variant || "Belirtilmedi";
   const index = Math.max(0, mechanicalParts(line)?.indexOf(panel) ?? 0);
   const position = String(panel.position || mechanicalPanelPosition(index, mechanicalParts(line)?.length || 1)).replace(/^Tek parça$/, "Tek");
-  const changed = includeBilling && Number.isFinite(panel.billable_width) && Number.isFinite(panel.billable_height) && (panel.billable_width !== panel.width || panel.billable_height !== panel.height);
-  return `<div class="mechanical-part"><strong>${safe(position)} ${line.case_mode === "ortak" ? "parça" : "kasa"}: ${number(panel.width)} × ${number(panel.height)} cm</strong><div>Renk / VR: ${safe(variant)} · ${line.motor_system?.role === "curtain" ? "Motor yönü" : "Zincir / ip yönü"}: ${safe(panel.chain_direction || "Belirtilmedi")}</div>${changed ? `<div>Hesap ölçüsü: ${number(panel.billable_width)} × ${number(panel.billable_height)} cm</div>` : ""}</div>`;
+  const changed = includeBilling && Number.isFinite(panel.billable_width) && (line.calc_type === "mt" ? panel.billable_width !== panel.width : Number.isFinite(panel.billable_height) && (panel.billable_width !== panel.width || panel.billable_height !== panel.height));
+  const direction = panel.chain_direction || needsControlDirection({ ...line, calculation_type: line.calc_type }) ? ` · ${line.motor_system?.role === "curtain" ? "Motor yönü" : "Zincir / ip yönü"}: ${safe(panel.chain_direction || "Belirtilmedi")}` : "";
+  const dimensions = panel.height > 0 ? `${number(panel.width)} × ${number(panel.height)} cm` : `En ${number(panel.width)} cm`;
+  return `<div class="mechanical-part"><strong>${safe(position)} ${line.case_mode === "ortak" ? "parça" : "kasa"}: ${dimensions}</strong><div>Renk / VR: ${safe(variant)}${direction}</div>${changed ? `<div>${line.calc_type === "mt" ? `Hesap eni: ${number(panel.billable_width)} cm` : `Hesap ölçüsü: ${number(panel.billable_width)} × ${number(panel.billable_height)} cm`}</div>` : ""}</div>`;
 }
 
 function caseDescription(line) {
