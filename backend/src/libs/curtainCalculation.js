@@ -29,9 +29,65 @@ export function needsControlDirection(product) {
   return productMode(product) === "mechanical" && /stor|zebra|jaluzi/.test(category);
 }
 
+export const isRusticProduct = (product) => normalizeName(product?.product_category?.category_name || product?.category_name) === "rustik";
+export const rusticFamilyName = (product) => String(product?.product_name || "").replace(/ · \d+(?:[.,]\d+)? cm(?= · |$)/g, "");
+export const isRusticSizeCandidate = (product) => isRusticProduct(product) && product.calculation_type === "adet" && product.fixed_dimensions?.width_cm >= 100 && rusticFamilyName(product) !== product.product_name;
+export const hasRusticSizePrices = (product) => isRusticProduct(product) && Array.isArray(product?.rustic_size_prices) && product.rustic_size_prices.length > 0;
+
+export function prepareRusticSizeProduct(product, catalog) {
+  if (!isRusticSizeCandidate(product)) return product;
+  const family = rusticFamilyName(product);
+  const brand = (item) => String(item.product_brand?._id || item.product_brand || item.brand_name || "");
+  const currency = product.currency || product.price_currency || "TRY";
+  const matches = catalog.filter((item) => isRusticSizeCandidate(item) && rusticFamilyName(item) === family && brand(item) === brand(product) && (item.currency || item.price_currency || "TRY") === currency);
+  const prices = new Map();
+  for (const item of matches) {
+    const width = Number(item.fixed_dimensions.width_cm), price = Number(item.sale_price);
+    if (!Number.isFinite(price) || price < 0 || (prices.has(width) && prices.get(width).sale_price !== price)) throw new Error("Rustik ölçü fiyatları doğrulanamadı.");
+    prices.set(width, { width_cm: width, sale_price: price });
+  }
+  if (!prices.size) throw new Error("Bu rustiğin ölçü fiyat listesi yüklenemedi.");
+  return { ...product, product_name: family, fixed_dimensions: null, rustic_size_prices: [...prices.values()].sort((a, b) => a.width_cm - b.width_cm) };
+}
+
+export function groupRusticProducts(products) {
+  const grouped = new Map();
+  const result = [];
+  for (const product of products) {
+    if (!isRusticSizeCandidate(product)) { result.push(product); continue; }
+    const key = JSON.stringify([String(product.product_brand?._id || product.product_brand || product.brand_name || ""), rusticFamilyName(product), product.currency || product.price_currency || "TRY"]);
+    if (grouped.has(key)) continue;
+    grouped.set(key, true);
+    const family = products.filter((item) => isRusticSizeCandidate(item) && rusticFamilyName(item) === rusticFamilyName(product) && String(item.product_brand?._id || item.product_brand || item.brand_name || "") === String(product.product_brand?._id || product.product_brand || product.brand_name || "") && (item.currency || item.price_currency || "TRY") === (product.currency || product.price_currency || "TRY"));
+    const first = family.reduce((best, item) => item.fixed_dimensions.width_cm < best.fixed_dimensions.width_cm ? item : best, product);
+    result.push(prepareRusticSizeProduct(first, family));
+  }
+  return result;
+}
+
+export function rusticSizePrice(product, width) {
+  const sizes = product.rustic_size_prices;
+  if (!Array.isArray(sizes) || !sizes.length || sizes.length > 1000) throw new Error("Rustik ölçü fiyat listesini kontrol edin.");
+  let previous = 0;
+  for (const size of sizes) {
+    if (!size || !Number.isFinite(size.width_cm) || size.width_cm < 100 || size.width_cm <= previous || !Number.isFinite(size.sale_price) || size.sale_price < 0) throw new Error("Rustik ölçü fiyat listesini kontrol edin.");
+    previous = size.width_cm;
+  }
+  const bounded = Math.max(100, positive(width, "En"));
+  const chosen = sizes.find((size) => size.width_cm + 1e-8 >= bounded);
+  if (!chosen) throw new Error(`Bu rustikte en fazla ${formatNumber(sizes.at(-1).width_cm)} cm için fiyat tanımlı. Daha büyük ölçü için fiyat girilmelidir.`);
+  return chosen;
+}
+
+export const isObaFoldingProduct = (product) => product?.calculation_type === "mt"
+  && normalizeName(product.product_brand?.brand_name || product.brand_name) === "oba perdesan"
+  && normalizeName(product.product_category?.category_name || product.category_name) === "ray"
+  && /5\s*\+\s*1(?!\d)/.test(product.product_name || "")
+  && /katlama/.test(normalizeName(product.product_name));
+
 export function supportsFoldingPanels(product) {
   return product?.calculation_type === "mt"
-    && normalizeName(product.product_category?.category_name || product.category_name) === "katlama sistemi"
+    && (normalizeName(product.product_category?.category_name || product.category_name) === "katlama sistemi" || isObaFoldingProduct(product))
     && /5\s*\+\s*1(?!\d)/.test(product.product_name || "");
 }
 
@@ -46,7 +102,7 @@ export function defaultMeasurement(product) {
   const mode = productMode(product);
   return {
     room_name: "Salon", area: "", facade: "", window_name: "", variant: "", item_note: "",
-    width: product.fixed_dimensions?.width_cm ? String(product.fixed_dimensions.width_cm) : mode === "fon" ? "80" : "", height: product.fixed_dimensions?.height_cm ? String(product.fixed_dimensions.height_cm) : mode === "standard" ? "" : "260", count: "1", order_mode: mode === "fon" ? "takim" : "adet",
+    width: hasRusticSizePrices(product) ? "" : product.fixed_dimensions?.width_cm ? String(product.fixed_dimensions.width_cm) : mode === "fon" ? "80" : "", height: isRusticProduct(product) ? "" : product.fixed_dimensions?.height_cm ? String(product.fixed_dimensions.height_cm) : mode === "standard" ? "" : "260", count: "1", order_mode: mode === "fon" ? "takim" : "adet",
     right_width: "80", right_height: "260", separate_right: false, pleat_id: "sik", labor_price: "0", currency_rate: "",
     ...(needsControlDirection(product) ? { chain_direction: "" } : {}),
     ...(supportsFoldingPanels(product) || needsControlDirection(product) && product.calculation_type === "m2" ? { case_mode: "ayri", mechanical_panels: [], profile_width_cm: "" } : {}),
@@ -173,7 +229,9 @@ export function calculateCurtainLine(product, form) {
   const currency = product.currency || product.price_currency || "TRY";
   const rate = currency === "TRY" ? 1 : positive(form.currency_rate, `${currency}/TL kuru`);
   const rateSnapshot = exchangeRateSnapshot(currency, form);
-  const nativePrice = nonnegative(product.sale_price, "Ürün fiyatı");
+  const rusticSizes = hasRusticSizePrices(product);
+  const selectedRusticSize = rusticSizes ? rusticSizePrice(product, form.width) : null;
+  const nativePrice = selectedRusticSize ? selectedRusticSize.sale_price : nonnegative(product.sale_price, "Ürün fiyatı");
   const basePrice = roundMoney(nativePrice * rate);
   const accessoryColors = parseAccessoryColors(form.accessory_colors);
   const accessoryCounts = parseAccessoryCounts(form.accessory_counts);
@@ -187,8 +245,8 @@ export function calculateCurtainLine(product, form) {
   if (caseMode === "ortak" && !hasMechanicalPanels) throw new Error("Ortak kasa için en az bir parça ekleyin.");
   const count = positive(form.count, hasMechanicalPanels ? "Kasa düzeni sayısı" : mode === "textile" ? "Parça sayısı" : "Adet / takım sayısı", true);
   let width = hasMechanicalPanels ? 0 : type === "adet" ? nonnegative(form.width, "En") : positive(form.width, "En");
-  let height = hasMechanicalPanels ? 0 : mode === "textile" || mode === "fon" || type === "m2" ? positive(form.height, "Boy") : nonnegative(form.height, "Boy");
-  if (!hasMechanicalPanels) validateProductDimensions(product, width, height);
+  let height = isRusticProduct(product) ? 0 : hasMechanicalPanels ? 0 : mode === "textile" || mode === "fon" || type === "m2" ? positive(form.height, "Boy") : nonnegative(form.height, "Boy");
+  if (!hasMechanicalPanels) validateProductDimensions(rusticSizes ? { ...product, fixed_dimensions: null } : product, width, height);
   const chainDirection = requiresDirection && !hasMechanicalPanels ? form.chain_direction : "";
   if (requiresDirection && !hasMechanicalPanels && !["Sağ", "Sol"].includes(chainDirection)) throw new Error("Zincir / ip yönünü seçin.");
   const profileWidth = hasMechanicalPanels && caseMode === "ortak" ? nonnegative(form.profile_width_cm, "Fiziksel kasa / profil eni") : 0;
@@ -206,7 +264,10 @@ export function calculateCurtainLine(product, form) {
     const steps = step ? bounded / step : 0;
     return roundQuantity(step ? Math.ceil(steps - Number.EPSILON * steps) * step : bounded);
   };
-  if (mode === "fon") {
+  if (selectedRusticSize) {
+    billableWidth = selectedRusticSize.width_cm;
+    note = `${count} adet · gerçek en ${formatNumber(width)} cm · liste ölçüsü ${formatNumber(billableWidth)} cm · ${formatMoney(basePrice)} / takım · boy hesabı yok`;
+  } else if (mode === "fon") {
     const team = form.order_mode === "takim";
     pieces = count * (team ? 2 : 1);
     const left = { label: team ? "Sol kanat" : "Kanat", width, height, cut_width: roundQuantity(width * pleat.factor + 40) };
@@ -265,7 +326,7 @@ export function calculateCurtainLine(product, form) {
     }
     note += `${minimum ? ` · minimum ${formatNumber(minimum)} m² / parça` : ""}${dimensionStep ? ` · en ve boy ${formatNumber(dimensionStep, 0)} cm adımına yuvarlanır` : ""}${step ? ` · ${formatNumber(step)} m² adımına yuvarlama` : ""}`;
   } else if (type === "mt") {
-    const minimumWidth = nonnegative(product.min_width_cm, "Minimum fiyatlandırma eni");
+    const minimumWidth = isRusticProduct(product) ? 100 : nonnegative(product.min_width_cm, "Minimum fiyatlandırma eni");
     const dimensionStep = nonnegative(product.dimension_rounding_cm, "Ölçü yuvarlama adımı");
     if (hasMechanicalPanels) {
       mechanicalPanels = form.mechanical_panels.map((panel, index) => {
@@ -332,7 +393,8 @@ export function calculateCurtainLine(product, form) {
     brand_name: product.product_brand?.brand_name || product.brand_name || "", category_name: product.product_category?.category_name || product.category_name || "",
     ...(showFabricSpecs(product) ? { fabric_width_cm: Number(product.fabric_width_cm) || 0, grammage_gr: Number(product.grammage_gr) || 0 } : {}),
     mode, calc_type: type, width, height, pieces, count, order_mode: form.order_mode, panels,
-    ...(mode === "mechanical" ? { billable_width: billableWidth, billable_height: billableHeight } : {}),
+    ...(mode === "mechanical" || rusticSizes ? { billable_width: billableWidth, billable_height: billableHeight } : {}),
+    ...(rusticSizes ? { rustic_pricing: { version: 1, list_width_cm: billableWidth } } : {}),
     ...(requiresDirection && !hasMechanicalPanels ? { chain_direction: chainDirection } : {}),
     ...(supportsPanels ? { case_mode: caseMode, case_count: caseCount, case_width: width, mechanical_panels: mechanicalPanels } : {}),
     ...(hasMechanicalPanels && caseMode === "ortak" ? { profile_width_cm: profileWidth } : {}),
@@ -341,11 +403,12 @@ export function calculateCurtainLine(product, form) {
     unit_price: itemTotal / quantity, item_total: itemTotal,
     original_currency: currency, original_unit_price: nativePrice, currency_rate: rate, ...rateSnapshot, calculation_note: note,
     pricing_snapshot: {
+      ...(rusticSizes ? { rustic_size_prices: product.rustic_size_prices.map((size) => ({ ...size })) } : {}),
       fixed_dimensions: product.fixed_dimensions ? { ...product.fixed_dimensions } : null,
       technical_limits: product.technical_limits ? { ...product.technical_limits } : null,
       supplier_unit: product.supplier_unit || null,
       min_m2: Number(product.min_m2) || 0, rounding_step: Number(product.rounding_step) || 0,
-      min_width_cm: Number(product.min_width_cm) || 0, min_height_cm: Number(product.min_height_cm) || 0,
+      min_width_cm: isRusticProduct(product) && type === "mt" ? 100 : Number(product.min_width_cm) || 0, min_height_cm: Number(product.min_height_cm) || 0,
       dimension_rounding_cm: Number(product.dimension_rounding_cm) || 0,
       extra_options: (form.extra_indices || []).map((index) => {
         const option = product.extra_options[index];
