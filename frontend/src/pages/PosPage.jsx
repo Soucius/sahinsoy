@@ -15,7 +15,7 @@ import HemAccessories from "../components/HemAccessories.jsx";
 import FoldingRodOptions from "../components/FoldingRodOptions.jsx";
 import { foldingRodOption, prepareObaFoldingProduct, setFoldingRodCount } from "../libs/foldingRods.js";
 import { hemAccessoryError, hemAccessoryOptions, normalizeHemForMechanism, selectHemAccessory } from "../libs/hemAccessories.js";
-import { labelFacadeLines, nextFacadeMeasurement } from "../libs/facadeEntry.js";
+import { changeFacadeRoom, labelFacadeLines, nextFacadeMeasurement } from "../libs/facadeEntry.js";
 import { isAutomationCategoryName } from "../../../backend/src/libs/posCatalogGroup.js";
 
 const EMPTY_HEADER = { first_name: "", last_name: "", customer_phone: "", customer_address: "", delivery_date: "", delivery_method: "", payment_method: "Nakit", sale_note: "", measurement_status: "preliminary", payment_currency: "TRY", payment_currency_rate: "", payment_rate_mode: "automatic", payment_rate_source: "Harem", payment_rate_type: null, payment_rate_date: null, payment_rate_fetched_at: null, payment_rate_quoted_at: null };
@@ -306,7 +306,7 @@ export default function PosPage() {
   const roomOptions = [...new Set([...ROOM_PRESETS, ...rooms.filter((room) => typeof room === "string" && room.trim())])];
   const dirty = () => { setReviewed(false); setSavedSale(null); };
   const updateHeader = (key, value) => { if (locked) return; setHeader((previous) => ({ ...previous, [key]: value })); dirty(); };
-  const updateMeasurement = (key, value) => setMeasurement((previous) => ({ ...previous, [key]: value }));
+  const updateMeasurement = (key, value) => setMeasurement((previous) => key === "room_name" ? changeFacadeRoom(previous, value, cart) : { ...previous, [key]: value });
   const closeProduct = () => { selectionRequest.current += 1; setSelected(null); };
   const refreshRates = () => { setFxLoading(true); setFxError(""); setFxRefresh((value) => value + 1); };
   const applyAutomaticRate = () => {
