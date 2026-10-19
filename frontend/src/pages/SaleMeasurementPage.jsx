@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import api from '../libs/axios';
 import { hasManufacturingItems, openCurtainPrint } from '../libs/curtainPrint';
 import { buildMeasurementRevision, changeMeasurementForms, measurementFormForLine, measurementLineGroups } from '../../../backend/src/libs/orderMeasurement.js';
+import { needsControlDirection } from '../libs/curtainCalculation.js';
 const money = value => Number(value || 0).toLocaleString('tr-TR', {
   style: 'currency',
   currency: 'TRY'
@@ -143,7 +144,7 @@ function MeasurementLine({
       <p className="font-semibold">{line.case_mode === 'ortak' ? 'Ortak kasa' : 'Ayrı kasalar'} · {line.mechanical_panels.length} parça</p>
       {form.mechanical_panels.map((panel, index) => <section key={index} className="rounded-xl border border-[#decdb7] p-4">
         <h4 className="mb-3 font-bold">{line.mechanical_panels[index].position || line.mechanical_panels[index].label || `${index + 1}. parça`} {line.case_mode === 'ortak' ? 'parça' : 'kasa'}</h4>
-        <p className="mb-3 text-sm text-[#6f5843]">Renk / VR: {line.mechanical_panels[index].variant || line.variant || 'Belirtilmedi'} · {directionLabel}: {line.mechanical_panels[index].chain_direction || 'Belirtilmedi'}</p>
+        <p className="mb-3 text-sm text-[#6f5843]">Renk / VR: {line.mechanical_panels[index].variant || line.variant || 'Belirtilmedi'}{line.mechanical_panels[index].chain_direction || needsControlDirection({ ...line, calculation_type: line.calc_type }) ? ` · ${directionLabel}: ${line.mechanical_panels[index].chain_direction || 'Belirtilmedi'}` : ''}</p>
         <DimensionInputs value={panel} widthLabel={`${index + 1}. parça eni (cm)`} heightLabel={`${index + 1}. parça boyu (cm)`} onChange={(key, value) => onChange('mechanical_panels', form.mechanical_panels.map((item, position) => position === index ? {
           ...item,
           [key]: value
