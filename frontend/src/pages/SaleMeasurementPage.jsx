@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import api from '../libs/axios';
 import { hasManufacturingItems, openCurtainPrint } from '../libs/curtainPrint';
 import { buildMeasurementRevision, changeMeasurementForms, measurementFormForLine, measurementLineGroups } from '../../../backend/src/libs/orderMeasurement.js';
-import { needsControlDirection } from '../libs/curtainCalculation.js';
+import { isRusticProduct, needsControlDirection } from '../libs/curtainCalculation.js';
 const money = value => Number(value || 0).toLocaleString('tr-TR', {
   style: 'currency',
   currency: 'TRY'
@@ -51,7 +51,7 @@ function dims(line) {
   if (line.mode === 'fon' && line.panels?.length) {
     return line.panels.map(panel => `${panel.label}: ${number(panel.width)} × ${number(panel.height)} cm`).join(' · ');
   }
-  return `${number(line.width)} × ${number(line.height)} cm`;
+  return isRusticProduct(line) ? `En ${number(line.width)} cm` : `${number(line.width)} × ${number(line.height)} cm`;
 }
 function dualDetails(line) {
   const dual = line.dual_plise;
@@ -76,13 +76,14 @@ function DimensionInputs({
   value,
   onChange,
   widthLabel = 'En (cm)',
-  heightLabel = 'Boy (cm)'
+  heightLabel = 'Boy (cm)',
+  hideHeight = false
 }) {
   return <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
     <label className="font-semibold">{widthLabel}<input className={input} inputMode="decimal" aria-label={widthLabel} value={value.width ?? ''} onChange={event => onChange('width', event.target.value)} placeholder="Örn. 155" />
     </label>
-    <label className="font-semibold">{heightLabel}<input className={input} inputMode="decimal" aria-label={heightLabel} value={value.height ?? ''} onChange={event => onChange('height', event.target.value)} placeholder="Örn. 250" />
-    </label>
+    {!hideHeight && <label className="font-semibold">{heightLabel}<input className={input} inputMode="decimal" aria-label={heightLabel} value={value.height ?? ''} onChange={event => onChange('height', event.target.value)} placeholder="Örn. 250" />
+    </label>}
   </div>;
 }
 function SharedDualMeasurementLine({ line, partner, form, onChange }) {
@@ -138,7 +139,7 @@ function MeasurementLine({
     </div>}
     {line.motor_system?.role === 'motor' ? <p className="mt-4 text-[#6f5843]">Bu motor bağlı olduğu perdeyle birlikte değerlendirilir. Motor için ayrıca ölçü girilmez.</p> : <>
     {dual && <p className="mt-4 rounded-xl border border-[#c8ad8c] bg-[#eee1d0] px-4 py-3 font-semibold">{dualDetails(line)}. Cam eni iki kumaşta birlikte güncellenir; boy yalnız bu kumaşa aittir.</p>}
-    <p className="my-4 rounded-xl bg-[#f4ecdf] px-4 py-3 text-[#593d29]">{team ? `${number(line.count)} takım · ${number(line.pieces)} kanat` : `${number(line.pieces || line.count)} ${line.mode === 'textile' ? 'parça' : line.mode === 'fon' ? 'kanat' : 'adet'}`} · Ürün {money(line.base_unit_price)} / {line.unit_label}{line.labor_unit_price ? ` · İşçilik ${money(line.labor_unit_price)} / m` : ''}. Birim fiyatlar korunur.</p>
+    <p className="my-4 rounded-xl bg-[#f4ecdf] px-4 py-3 text-[#593d29]">{team ? `${number(line.count)} takım · ${number(line.pieces)} kanat` : `${number(line.pieces || line.count)} ${line.mode === 'textile' ? 'parça' : line.mode === 'fon' ? 'kanat' : 'adet'}`} · Ürün {money(line.base_unit_price)} / {line.unit_label}{line.labor_unit_price ? ` · İşçilik ${money(line.labor_unit_price)} / m` : ''}. {line.rustic_pricing ? "Kayıtlı ölçü fiyat listesi korunur; yeni ene uygun üst liste fiyatı kullanılır." : "Birim fiyatlar korunur."}</p>
     <AccessoryDetails line={line} />
     {form.mechanical_panels?.length ? <div className="space-y-4">
       <p className="font-semibold">{line.case_mode === 'ortak' ? 'Ortak kasa' : 'Ayrı kasalar'} · {line.mechanical_panels.length} parça</p>
@@ -154,7 +155,7 @@ function MeasurementLine({
         <span className="mt-2 block text-sm font-normal text-[#6f5843]">İmalat içindir. Kasa farkı parçaların gerçek enleri toplamıyla hesaplanır.</span>
       </label>}
     </div> : <>
-      <DimensionInputs value={form} widthLabel={dual ? 'Ortak cam eni (cm)' : team ? 'Sol kanat eni (cm)' : line.mode === 'textile' ? 'Toplam en (cm)' : 'En (cm)'} heightLabel={dual ? `${dual.role === 'tul' ? 'Tül' : 'Güneşlik'} boyu (cm)` : team ? 'Sol kanat boyu (cm)' : 'Boy (cm)'} onChange={onChange} />
+      <DimensionInputs value={form} hideHeight={isRusticProduct(line)} widthLabel={dual ? 'Ortak cam eni (cm)' : team ? 'Sol kanat eni (cm)' : line.mode === 'textile' ? 'Toplam en (cm)' : 'En (cm)'} heightLabel={dual ? `${dual.role === 'tul' ? 'Tül' : 'Güneşlik'} boyu (cm)` : team ? 'Sol kanat boyu (cm)' : 'Boy (cm)'} onChange={onChange} />
       {team && <div className="mt-4">
         <DimensionInputs value={{
           width: form.right_width,
