@@ -1,4 +1,4 @@
-import { accessoryCountsFromLine, calculateCurtainLine, formatNumber, paymentConversion, PLEATS, productMode, roundMoney, roundQuantity, salePayload } from "./curtainCalculation.js";
+import { accessoryCountsFromLine, calculateCurtainLine, formatNumber, isRusticProduct, paymentConversion, PLEATS, productMode, roundMoney, roundQuantity, salePayload } from "./curtainCalculation.js";
 import { validateDualPliseGroups } from "./dualPlise.js";
 import { validateMotorSystemGroups } from "./motorSystem.js";
 
@@ -99,14 +99,14 @@ export function measurementSummary(line) {
   if (line.dual_plise) return `${line.dual_plise.glass_label} · ${line.dual_plise.role === "tul" ? "Tül" : "Güneşlik"}: ${size(line)} · Kasa rengi: ${line.dual_plise.case_color || "Seçilmedi"}`;
   if (panels) return line.mechanical_panels.map((panel, index) => `${panel.position || `${index + 1}. parça`}: ${size(panel)}`).join(" · ");
   if (team) return `Sol: ${size(line.panels[0])} · Sağ: ${size(line.panels[1])}`;
-  return size(line);
+  return isRusticProduct(line) ? `En ${formatNumber(line.width)} cm` : size(line);
 }
 
 function frozenRules(line, product) {
   const snapshot = object(line.pricing_snapshot) ? line.pricing_snapshot : {};
   const measuredMechanical = line.mode === "mechanical" && ["m2", "mt"].includes(line.calc_type);
   const rules = {};
-  for (const key of ["fixed_dimensions", "technical_limits", "supplier_unit"]) {
+  for (const key of ["fixed_dimensions", "technical_limits", "supplier_unit", "rustic_size_prices"]) {
     if (has(snapshot, key)) rules[key] = copy(snapshot[key]);
     else if (product?.[key]) rules[key] = copy(product[key]);
   }
@@ -208,6 +208,11 @@ function reviseLine(line, measurement, product) {
     if (!Number.isFinite(calculated[key]) || calculated[key] < 0) throw new Error("Ölçü hesabı geçerli sayı aralığını aşıyor.");
   }
   const revised = copy(line);
+  if (calculated.rustic_pricing) {
+    revised.rustic_pricing = copy(calculated.rustic_pricing);
+    revised.base_unit_price = calculated.base_unit_price;
+    revised.original_unit_price = calculated.original_unit_price;
+  }
   for (const key of geometryFields) if (has(calculated, key)) revised[key] = calculated[key];
   revised.panels = calculated.panels.map((panel, index) => ({ ...(line.panels?.[index] || {}), width: panel.width, height: panel.height, cut_width: panel.cut_width }));
   if (shape.panels) revised.mechanical_panels = calculated.mechanical_panels.map((panel, index) => {
