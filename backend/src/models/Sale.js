@@ -57,6 +57,20 @@ const saleSchema = new mongoose.Schema({
     credit_card_fee: { type: Number, default: 0 },     
     grand_total: { type: Number, required: true },     
     payment_method: { type: String, default: "Nakit" },
+    payment_revision: { type: Number, default: 0, min: 0, validate: Number.isInteger },
+    payments: { type: [new mongoose.Schema({
+        request_id: { type: String, required: true, maxlength: 100 },
+        amount: { type: Number, required: true, min: 0.01 },
+        method: { type: String, enum: ["Nakit", "Havale / EFT", "Kredi Kartı", "Mail Order"], required: true },
+        kind: { type: String, enum: ["Kapora", "Ara ödeme", "Teslimat ödemesi", "Tam ödeme"], required: true },
+        paid_date: { type: String, required: true },
+        note: { type: String, default: "", maxlength: 500 },
+        recorded_at: { type: Date, required: true },
+        recorded_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+        voided_at: { type: Date, default: null },
+        voided_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+        void_reason: { type: String, default: "", maxlength: 500 }
+    }, { _id: false })], default: [] },
     status: { 
         type: String, 
         enum: ["beklemede", "tamamlandi", "kaybedildi", "iptal", "teslim_edildi"],
