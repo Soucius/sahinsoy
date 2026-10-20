@@ -98,6 +98,9 @@ export default function PosPage() {
   const [agreedPrice, setAgreedPrice] = useState(null);
   const [recordedFee, setRecordedFee] = useState(0);
   const [selected, setSelected] = useState(null);
+  const [productPicker, setProductPicker] = useState(false);
+  const [pickerRoom, setPickerRoom] = useState("");
+  const [pickerContext, setPickerContext] = useState(null);
   const [measurement, setMeasurement] = useState(null);
   const [wizardStep, setWizardStep] = useState(1);
   const [editId, setEditId] = useState(null);
@@ -329,6 +332,7 @@ export default function PosPage() {
   const updateHeader = (key, value) => { if (locked) return; setHeader((previous) => ({ ...previous, [key]: value })); dirty(); };
   const updateMeasurement = (key, value) => setMeasurement((previous) => key === "room_name" ? changeFacadeRoom(previous, value, cart) : { ...previous, [key]: value });
   const closeProduct = () => { selectionRequest.current += 1; setSelected(null); };
+  const closeProductPicker = () => { selectionRequest.current += 1; setProductPicker(false); };
   const refreshRates = () => { setFxLoading(true); setFxError(""); setFxRefresh((value) => value + 1); };
   const applyAutomaticRate = () => {
     if (locked || processing || fxLoading || !["USD", "EUR"].includes(fxContext.current.currency)) return;
@@ -466,6 +470,9 @@ export default function PosPage() {
 
   const openProduct = async (product) => {
     if (locked || processing) return;
+    const targetRoom = productPicker ? pickerRoom.trim() : lastRoom.current;
+    if (productPicker && !targetRoom) { toast.error("Önce oda / bölüm seçin veya adını yazın."); return; }
+    const targetContext = productPicker && pickerContext?.room_name === targetRoom ? pickerContext : {};
     const request = ++selectionRequest.current;
     if (isRusticSizeCandidate(product) || hasRusticSizePrices(product)) {
       try {
@@ -500,8 +507,10 @@ export default function PosPage() {
     setBatchRows([{ ...createMeasurementRow(), key: nextKey() }]);
     setBatchTarget("1");
     const quote = !fxLoading && !fxError && isFreshQuote(fxQuote) ? fxQuote : null;
-    setMeasurement(builderForm(product, { ...defaultMeasurement(product), room_name: lastRoom.current, ...(productCurrency !== "TRY" ? ["USD", "EUR"].includes(productCurrency) ? rateFields(quote, productCurrency) : manualRateFields : {}) }));
+    setMeasurement(builderForm(product, { ...defaultMeasurement(product), ...targetContext, room_name: targetRoom, ...(productCurrency !== "TRY" ? ["USD", "EUR"].includes(productCurrency) ? rateFields(quote, productCurrency) : manualRateFields : {}) }));
     if (["USD", "EUR"].includes(productCurrency) && !quote && !fxLoading) refreshRates();
+    lastRoom.current = targetRoom;
+    setProductPicker(false);
     setWizardStep(1);
   };
 
@@ -576,7 +585,19 @@ export default function PosPage() {
     } catch (error) { if (request === selectionRequest.current) toast.error(error.message || "Ürün düzenlenemedi."); }
   };
 
-  const finishProductAddition = (updatedCart, keepOpen) => {
+  const openProductPicker = () => {
+    setPickerRoom(measurement?.room_name || lastRoom.current || "");
+    setPickerContext(measurement ? { room_name: measurement.room_name, area: measurement.area, facade: measurement.facade, window_name: measurement.window_name } : null);
+    setFilters(previous => ({ ...previous, search: "", brand: "", category: "", page: 1 }));
+    setProductPicker(true);
+  };
+  const finishProductAddition = (updatedCart, keepOpen, newRoom) => {
+    if (newRoom) {
+      closeProduct(); setPickerRoom(""); setPickerContext(null); setProductPicker(true);
+      setFilters(previous => ({ ...previous, search: "", brand: "", category: "", page: 1 }));
+      toast.success("Ürün eklendi. Yeni odayı ve istediğiniz ürünü seçin.");
+      return;
+    }
     if (!keepOpen) { closeProduct(); return; }
     selectionRequest.current += 1;
     setEditId(null); setEditDualPair(null); setEditMotorPair(null);
@@ -592,6 +613,7 @@ export default function PosPage() {
 
   const addLine = (continueWithNextFacade = false) => {
     const keepOpen = continueWithNextFacade === true && !editId && !editDualPair && !editMotorPair;
+    const newRoom = continueWithNextFacade === "room" && !editId && !editDualPair && !editMotorPair;
     const labelLines = (lines) => keepOpen ? labelFacadeLines(lines, cart, measurement.room_name) : lines;
     if (locked || processing) return;
     if (!measurement.room_name.trim()) { toast.error("Oda / bölüm adını girin."); return; }
@@ -607,8 +629,8 @@ export default function PosPage() {
       const updated = cart.filter((item) => !removed.has(item.id));
       updated.splice(position < 0 ? updated.length : position, 0, ...lines);
       try { validateMotorSystemGroups(updated); validateDualPliseGroups(updated); } catch (error) { toast.error(error.message); return; }
-      setCart(updated); lastRoom.current = measurement.room_name.trim(); dirty(); finishProductAddition(updated, keepOpen);
-      if (!keepOpen) toast.success(editId ? "Motorlu sistem güncellendi." : "Motorlu perde siparişe eklendi.");
+      setCart(updated); lastRoom.current = measurement.room_name.trim(); dirty(); finishProductAddition(updated, keepOpen, newRoom);
+      if (!keepOpen && !newRoom) toast.success(editId ? "Motorlu sistem güncellendi." : "Motorlu perde siparişe eklendi.");
       return;
     }
     if (batchActive) {
@@ -628,8 +650,8 @@ export default function PosPage() {
       setCart(updated);
       lastRoom.current = measurement.room_name.trim();
       dirty();
-      finishProductAddition(updated, keepOpen);
-      if (!keepOpen) toast.success(editDualPair || editId ? "Ölçüler güncellendi." : dualActive ? `${batchCalculation.value.pieces} çiftli sistem siparişe eklendi.` : `${lines.length} ölçü satırı / ${batchCalculation.value.pieces} adet siparişe eklendi.`);
+      finishProductAddition(updated, keepOpen, newRoom);
+      if (!keepOpen && !newRoom) toast.success(editDualPair || editId ? "Ölçüler güncellendi." : dualActive ? `${batchCalculation.value.pieces} çiftli sistem siparişe eklendi.` : `${lines.length} ölçü satırı / ${batchCalculation.value.pieces} adet siparişe eklendi.`);
       return;
     }
     if (!calculation?.line) { toast.error(calculation?.error || "Ölçüleri kontrol edin."); return; }
@@ -639,8 +661,8 @@ export default function PosPage() {
     setCart(updated);
     lastRoom.current = line.room_name;
     dirty();
-    finishProductAddition(updated, keepOpen);
-    if (!keepOpen) toast.success(editId ? "Ürün ölçüleri güncellendi." : "Ürün siparişe eklendi.");
+    finishProductAddition(updated, keepOpen, newRoom);
+    if (!keepOpen && !newRoom) toast.success(editId ? "Ürün ölçüleri güncellendi." : "Ürün siparişe eklendi.");
   };
 
   const validateHeader = () => {
@@ -721,6 +743,19 @@ export default function PosPage() {
   const dualGroupIds = [...new Set(cart.filter((line) => line.dual_plise).map((line) => line.dual_plise.group_id))];
   const motorGroupIds = [...new Set(cart.filter((line) => line.motor_system).map((line) => line.motor_system.group_id))];
 
+  const productSelectionContents = <>
+      <div className="row" style={{ justifyContent: "space-between" }}><h2>Ürün seçin</h2><span className="muted">{totalProducts} ürün</span></div>
+      {locked && <div className="notice">{cancelled ? "Bu sipariş iptal edildi." : delivered ? "Bu iş teslim edildi." : "Bu sipariş onaylandı."} Yeni bir sipariş için <button onClick={newOrder}><Plus size={16} />Yeni sipariş</button></div>}
+      <div className="row" role="group" aria-label="Ürün grubu">{[["curtains", "Perdeler"], ["automation", "Motor ve kumanda"]].map(([value, label]) => <button key={value} type="button" className="chip" aria-pressed={filters.pos_group === value} onClick={() => setFilters((previous) => ({ ...previous, pos_group: value, category: "", search: "", page: 1 }))}>{label}</button>)}</div>
+      <div className="filters">
+        <Field label={<span className="row"><Search size={16} />Ürün / desen / barkod ara</span>}><input autoComplete="off" value={filters.search} onChange={(event) => updateFilter("search", event.target.value)} placeholder="Örn. Isabella veya 2506" /></Field>
+        <Field label="Marka"><select value={filters.brand} onChange={(event) => updateFilter("brand", event.target.value)}><option value="">Tüm markalar</option>{brands.map((brand) => <option key={brand._id} value={brand._id}>{brand.brand_name}</option>)}</select></Field>
+        <Field label="Kategori"><select value={filters.category} onChange={(event) => updateFilter("category", event.target.value)}><option value="">Tüm kategoriler</option>{categories.filter((category) => isAutomationCategoryName(category.category_name) === (filters.pos_group === "automation")).map((category) => <option key={category._id} value={category._id}>{category.category_name}</option>)}</select></Field>
+      </div>
+      {fetchError ? <div className="empty"><p className="error">{fetchError}</p><button onClick={() => setRefresh((value) => value + 1)}>Yeniden dene</button></div> : loading ? <div className="empty" role="status"><Loader2 className="spin" size={28} style={{ margin: "0 auto 10px" }} />Ürünler yükleniyor…</div> : !products.length ? <div className="empty"><Package size={32} style={{ margin: "0 auto" }} /><p>Bu seçimde ürün bulunamadı.</p></div> : <div className="products">{products.map((product) => <button key={product._id} className="product-card" disabled={locked || processing} onClick={() => openProduct(product)}><span className="muted">{product.product_brand?.brand_name} · {product.product_category?.category_name}</span><span className="product-title">{product.product_name}</span>{showFabricSpecs(product) ? <span className="muted">{product.product_color && product.product_color !== "Belirtilmedi" ? product.product_color : "Renk / VR seçimi ürün içinde"}</span> : null}{showFabricSpecs(product) && (product.fabric_width_cm || product.grammage_gr) ? <span className="muted">Kumaş eni {product.fabric_width_cm || "—"} cm · {product.grammage_gr || "—"} g</span> : null}<span className="product-price">{hasRusticSizePrices(product) ? `${formatMoney(product.rustic_size_prices[0].sale_price, product.currency || "TRY")} başlangıç` : formatMoney(product.sale_price, product.currency || product.price_currency || "TRY")} <span className="muted">/ {hasRusticSizePrices(product) ? "takım" : product.calculation_type === "m2" ? "m²" : product.calculation_type === "mt" ? "m" : "adet"}</span></span></button>)}</div>}
+      <div className="row pagination"><button disabled={filters.page <= 1 || loading} onClick={() => setFilters((previous) => ({ ...previous, page: previous.page - 1 }))}><ArrowLeft size={17} />Önceki</button><span className="muted">Sayfa {filters.page} / {pages}</span><button disabled={filters.page >= pages || loading} onClick={() => setFilters((previous) => ({ ...previous, page: previous.page + 1 }))}>Sonraki<ArrowRight size={17} /></button></div>
+  </>;
+
   return <div className="curtain-pos">
     <style>{POS_STYLE}</style>
     <header className="pos-brand"><img src="/sahinsoy-logo.svg" alt="Şahinsoy Perde ve Döşemelik logosu" /><div><h1>Şahinsoy POS</h1><p className="muted">Satış ve sipariş ekranı</p></div></header>
@@ -737,16 +772,7 @@ export default function PosPage() {
     {!savedSale && existingId && <div className="notice">Kayıtlı siparişi düzenliyorsunuz. Değişiklikleri kaydetmek için Beklemede veya Siparişi onayla düğmesini kullanın.</div>}
 
     {tab === "products" ? <section className="panel" role="tabpanel" aria-label="Ürün seçimi">
-      <div className="row" style={{ justifyContent: "space-between" }}><h2>Ürün seçin</h2><span className="muted">{totalProducts} ürün</span></div>
-      {locked && <div className="notice">{cancelled ? "Bu sipariş iptal edildi." : delivered ? "Bu iş teslim edildi." : "Bu sipariş onaylandı."} Yeni bir sipariş için <button onClick={newOrder}><Plus size={16} />Yeni sipariş</button></div>}
-      <div className="row" role="group" aria-label="Ürün grubu">{[["curtains", "Perdeler"], ["automation", "Motor ve kumanda"]].map(([value, label]) => <button key={value} type="button" className="chip" aria-pressed={filters.pos_group === value} onClick={() => setFilters((previous) => ({ ...previous, pos_group: value, category: "", search: "", page: 1 }))}>{label}</button>)}</div>
-      <div className="filters">
-        <Field label={<span className="row"><Search size={16} />Ürün / desen / barkod ara</span>}><input autoComplete="off" value={filters.search} onChange={(event) => updateFilter("search", event.target.value)} placeholder="Örn. Isabella veya 2506" /></Field>
-        <Field label="Marka"><select value={filters.brand} onChange={(event) => updateFilter("brand", event.target.value)}><option value="">Tüm markalar</option>{brands.map((brand) => <option key={brand._id} value={brand._id}>{brand.brand_name}</option>)}</select></Field>
-        <Field label="Kategori"><select value={filters.category} onChange={(event) => updateFilter("category", event.target.value)}><option value="">Tüm kategoriler</option>{categories.filter((category) => isAutomationCategoryName(category.category_name) === (filters.pos_group === "automation")).map((category) => <option key={category._id} value={category._id}>{category.category_name}</option>)}</select></Field>
-      </div>
-      {fetchError ? <div className="empty"><p className="error">{fetchError}</p><button onClick={() => setRefresh((value) => value + 1)}>Yeniden dene</button></div> : loading ? <div className="empty" role="status"><Loader2 className="spin" size={28} style={{ margin: "0 auto 10px" }} />Ürünler yükleniyor…</div> : !products.length ? <div className="empty"><Package size={32} style={{ margin: "0 auto" }} /><p>Bu seçimde ürün bulunamadı.</p></div> : <div className="products">{products.map((product) => <button key={product._id} className="product-card" disabled={locked || processing} onClick={() => openProduct(product)}><span className="muted">{product.product_brand?.brand_name} · {product.product_category?.category_name}</span><span className="product-title">{product.product_name}</span>{showFabricSpecs(product) ? <span className="muted">{product.product_color && product.product_color !== "Belirtilmedi" ? product.product_color : "Renk / VR seçimi ürün içinde"}</span> : null}{showFabricSpecs(product) && (product.fabric_width_cm || product.grammage_gr) ? <span className="muted">Kumaş eni {product.fabric_width_cm || "—"} cm · {product.grammage_gr || "—"} g</span> : null}<span className="product-price">{hasRusticSizePrices(product) ? `${formatMoney(product.rustic_size_prices[0].sale_price, product.currency || "TRY")} başlangıç` : formatMoney(product.sale_price, product.currency || product.price_currency || "TRY")} <span className="muted">/ {hasRusticSizePrices(product) ? "takım" : product.calculation_type === "m2" ? "m²" : product.calculation_type === "mt" ? "m" : "adet"}</span></span></button>)}</div>}
-      <div className="row pagination"><button disabled={filters.page <= 1 || loading} onClick={() => setFilters((previous) => ({ ...previous, page: previous.page - 1 }))}><ArrowLeft size={17} />Önceki</button><span className="muted">Sayfa {filters.page} / {pages}</span><button disabled={filters.page >= pages || loading} onClick={() => setFilters((previous) => ({ ...previous, page: previous.page + 1 }))}>Sonraki<ArrowRight size={17} /></button></div>
+      {!productPicker && productSelectionContents}
       <div className="actions divider"><button className="primary" onClick={() => setTab("summary")}>Sonraki: Sipariş özeti ({cart.length})<ArrowRight size={18} /></button></div>
     </section> : <div role="tabpanel" aria-label="Sipariş özeti">
       <div className="summary-grid">
@@ -808,8 +834,17 @@ export default function PosPage() {
       {!locked && <p className="muted" style={{ marginTop: 12 }}>İmalat ve müşteri çıktıları, sipariş onaylanıp kaydedildikten sonra açılır.</p>}
     </div>}
 
-    {selected && measurement && <div className="modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) closeProduct(); }}><section className={`modal${batchActive || motorEnabled ? " modal-measurements" : ""}`} role="dialog" aria-modal="true" aria-labelledby="pos-product-heading">
+    {productPicker && <div className="modal-backdrop"><section className="modal modal-measurements" role="dialog" aria-modal="true" aria-label="Oda ve ürün seçimi">
+      <div className="modal-heading"><h2>Oda ve ürün seçimi</h2><button type="button" className="modal-close" aria-label="Ürün seçimini kapat" onClick={closeProductPicker}><X size={23} /></button></div>
+      <p className="muted">Odayı ve ürünü kendiniz seçin. Siparişe eklenmiş kalemler korunur. Farklı ürün seçince yeni ürünün ölçülerini girin.</p>
+      <div role="group" aria-label="Yeni ürünün odası" className="pos-room-options">{roomOptions.map(room => <button key={room} type="button" className="chip" aria-pressed={pickerRoom === room} disabled={locked || processing} onClick={() => setPickerRoom(room)}>{room}</button>)}</div>
+      <Field label="Yeni ürün için oda / bölüm adı"><input value={pickerRoom} maxLength={100} onChange={event => setPickerRoom(event.target.value)} placeholder="Oda seçin veya örn. Çocuk Odası 2 yazın" /></Field>
+      <div className="divider">{productSelectionContents}</div>
+      <div className="actions divider"><button type="button" onClick={closeProductPicker}>{selected ? "Ölçü ekranına dön" : "Vazgeç"}</button><button type="button" onClick={() => { closeProductPicker(); closeProduct(); setTab("products"); }}>POS ürün listesine dön</button></div>
+    </section></div>}
+    {!productPicker && selected && measurement && <div className="modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) closeProduct(); }}><section className={`modal${batchActive || motorEnabled ? " modal-measurements" : ""}`} role="dialog" aria-modal="true" aria-labelledby="pos-product-heading">
       <div className="modal-heading"><div><h2 id="pos-product-heading">{selected.product_name}</h2><p className="muted">{selected.product_brand?.brand_name} · Adım {wizardStep} / 2: {wizardStep === 1 ? "Oda, cephe ve pencere" : "Ölçü ve fiyat"}</p></div><button className="modal-close" aria-label="Ürün penceresini kapat" onClick={closeProduct}><X size={23} /></button></div>
+      {!editId && !editDualPair && !editMotorPair && <div className="actions" style={{ marginBottom: 12 }}><button type="button" disabled={locked || processing} onClick={openProductPicker}><Package size={17} />Ürün seçimi</button><span className="muted">İstersen bu oda / cephe için farklı ürün seçebilirsin.</span></div>}
       {wizardStep === 1 ? <>
         <h3 className="choice-label">Oda / bölüm seçin</h3>
         <div role="group" aria-label="Oda seçenekleri" className="pos-room-options">
@@ -886,7 +921,7 @@ export default function PosPage() {
         {!dualActive && selected.extra_options?.some((option) => option.pricing_basis === "mt" || option.calculation_type === "mt") && <p className="muted">Metreli aksesuarlar gerçek en üzerinden hesaplanır.</p>}
         <Field label="Ürün / imalat notu" full><textarea maxLength={500} value={measurement.item_note} onChange={(event) => updateMeasurement("item_note", event.target.value)} placeholder="Örn. etek modeli, kasa rengi…" /></Field>
         <div className="price-box" aria-live="polite">{motorEnabled ? (motorCalculation?.value ? <><p>Perde ve aksesuarlar: <strong>{formatMoney(motorCalculation.value.curtain.item_total)}</strong></p><p>{motorCalculation.value.motorCount} motor × {formatMoney(motorCalculation.value.motor.base_unit_price)} = <strong>{formatMoney(motorCalculation.value.motor.item_total)}</strong></p><p className="big">{formatMoney(motorCalculation.value.total)}</p><p className="muted">Motor ve perde birlikte siparişe eklenecek.</p></> : <p className="error">{motorCalculation?.error}</p>) : batchActive ? (batchCalculation?.value ? <><p><strong>{batchRows.length} ölçü satırı · {batchCalculation.value.pieces} adet</strong></p><p>Toplam hesaplanan miktar: <strong>{formatNumber(batchCalculation.value.quantity)} m²</strong></p><p className="big">{formatMoney(batchCalculation.value.total)}</p><p className="muted">Her camın fiyatı kendi ölçüsü ve adedine göre ayrı hesaplandı.</p></> : <p className="error">{batchCalculation?.error}</p>) : calculation?.line ? <><MechanicalDetails line={calculation.line} /><p>{mode === "fon" || mode === "textile" ? "Giden kumaş" : "Hesaplanan miktar"}: <strong>{formatNumber(calculation.line.quantity)} {calculation.line.unit_label}</strong>{mode === "fon" ? ` · ${calculation.line.pieces} kanat` : ""}</p>{hasBillingDimensions(calculation.line) && <p>Hesap ölçüsü: {formatNumber(calculation.line.billable_width)} × {formatNumber(calculation.line.billable_height)} cm</p>}<p>{formatNumber(calculation.line.quantity)} {calculation.line.unit_label} × {formatMoney(calculation.line.base_unit_price)} = {formatMoney(calculation.line.material_total)}</p>{calculation.line.labor_total > 0 && <p>İşçilik: {formatNumber(calculation.line.quantity)} m × {formatMoney(calculation.line.labor_unit_price)} = {formatMoney(calculation.line.labor_total)}</p>}{calculation.line.accessories_total > 0 && <p>Aksesuarlar: {formatMoney(calculation.line.accessories_total)}</p>}<p className="muted">{calculation.line.calculation_note}</p><p className="big">{formatMoney(calculation.line.item_total)}</p></> : <p className="error">{calculation?.error}</p>}</div>
-        <div className="actions"><button onClick={() => setWizardStep(1)}><ArrowLeft size={18} />Geri</button>{!editId && !editDualPair && !editMotorPair && <button disabled={(motorEnabled ? !motorCalculation?.value : batchActive ? !batchCalculation?.value : !calculation?.line) || locked || processing} onClick={() => addLine(true)}><Plus size={18} />Ekle ve yeni cephe aç</button>}<button className="primary" disabled={(motorEnabled ? !motorCalculation?.value : batchActive ? !batchCalculation?.value : !calculation?.line) || locked || processing} onClick={() => addLine()}><Plus size={18} />{editId || editDualPair || editMotorPair ? "Değişiklikleri kaydet" : batchActive ? "Tüm ölçüleri siparişe ekle" : "Siparişe ekle"}</button></div>
+        <div className="actions"><button onClick={() => setWizardStep(1)}><ArrowLeft size={18} />Geri</button>{!editId && !editDualPair && !editMotorPair && <button disabled={(motorEnabled ? !motorCalculation?.value : batchActive ? !batchCalculation?.value : !calculation?.line) || locked || processing} onClick={() => addLine(true)}><Plus size={18} />Ekle ve yeni cephe aç</button>}{!editId && !editDualPair && !editMotorPair && <button disabled={(motorEnabled ? !motorCalculation?.value : batchActive ? !batchCalculation?.value : !calculation?.line) || locked || processing} onClick={() => addLine("room")}><Home size={18} />Ekle ve yeni oda aç</button>}<button className="primary" disabled={(motorEnabled ? !motorCalculation?.value : batchActive ? !batchCalculation?.value : !calculation?.line) || locked || processing} onClick={() => addLine()}><Plus size={18} />{editId || editDualPair || editMotorPair ? "Değişiklikleri kaydet" : batchActive ? "Tüm ölçüleri siparişe ekle" : "Siparişe ekle"}</button></div>
       </>}
     </section></div>}
   </div>;
