@@ -27,16 +27,18 @@ function text(value, max, label) {
   return value.trim();
 }
 export function paymentEntry(sale, input, actor, now = new Date()) {
-  object(input, ["request_id", "expected_revision", "amount", "method", "kind", "paid_date", "note"]);
+  object(input, ["request_id", "expected_revision", "amount", "method", "kind", "paid_date", "note", "company"]);
   if (typeof input.request_id !== "string" || !/^[a-zA-Z\d_-]{8,100}$/.test(input.request_id)) throw new PaymentInputError("Tahsilat işlem kimliği geçersiz.");
   if (typeof input.amount !== "number" || !Number.isFinite(input.amount) || input.amount <= 0 || !Number.isSafeInteger(cent(input.amount)) || Math.abs(cent(input.amount) / 100 - input.amount) > 0.0000001) throw new PaymentInputError("Tahsilat tutarını pozitif ve en fazla iki ondalık olarak girin.");
   if (!PAYMENT_METHODS.includes(input.method) || !PAYMENT_KINDS.includes(input.kind)) throw new PaymentInputError("Tahsilat türünü ve ödeme yöntemini seçin.");
   if (typeof input.paid_date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(input.paid_date) || !Number.isFinite(Date.parse(`${input.paid_date}T00:00:00Z`)) || new Date(`${input.paid_date}T00:00:00Z`).toISOString().slice(0,10) !== input.paid_date) throw new PaymentInputError("Tahsilat tarihi geçersiz.");
   const note = text(input.note ?? "", 500, "Tahsilat notu");
-  const entry = { request_id: input.request_id, amount: cent(input.amount) / 100, method: input.method, kind: input.kind, paid_date: input.paid_date, note };
+  const company = text(input.company ?? "", 120, "Mail order firması");
+  if (company && input.method !== "Mail Order") throw new PaymentInputError("Firma seçimi yalnız mail order tahsilatında kullanılabilir.");
+  const entry = { request_id: input.request_id, amount: cent(input.amount) / 100, method: input.method, kind: input.kind, paid_date: input.paid_date, note, company };
   const prior = (sale.payments || []).find((item) => item.request_id === entry.request_id);
   if (prior) {
-    if (Object.keys(entry).some((key) => plain(prior)[key] !== entry[key])) throw new PaymentInputError("Aynı tahsilat işlem kimliği farklı bilgilerle kullanılamaz.", 409);
+    if (Object.keys(entry).some((key) => (key === "company" ? plain(prior)[key] ?? "" : plain(prior)[key]) !== entry[key])) throw new PaymentInputError("Aynı tahsilat işlem kimliği farklı bilgilerle kullanılamaz.", 409);
     return { existing: true, entry: prior };
   }
   if (!["tamamlandi", "teslim_edildi"].includes(sale.status)) throw new PaymentInputError("Tahsilat yalnız onaylanmış veya teslim edilmiş siparişe eklenebilir.", 409);
