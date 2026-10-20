@@ -12,6 +12,7 @@ import saleRoutes from "./routes/sale.route.js";
 import categoryRoutes from "./routes/category.route.js";
 import dashboardRoutes from "./routes/dashboard.route.js";
 import exchangeRateRoutes from "./routes/exchangeRate.route.js";
+import mailOrderCompanyRoutes from "./routes/mailOrderCompany.route.js";
 
 const app = express();
 const PORT = ENV.PORT || 3000;
@@ -32,6 +33,7 @@ app.use("/api/sales", saleRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/exchange-rates", exchangeRateRoutes);
+app.use("/api/mail-order-companies", mailOrderCompanyRoutes);
 
 connectDB().then(() => {
     app.listen(PORT, () => {
