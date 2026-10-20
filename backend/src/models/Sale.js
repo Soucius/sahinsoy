@@ -62,6 +62,7 @@ const saleSchema = new mongoose.Schema({
         request_id: { type: String, required: true, maxlength: 100 },
         amount: { type: Number, required: true, min: 0.01 },
         method: { type: String, enum: ["Nakit", "Havale / EFT", "Kredi Kartı", "Mail Order"], required: true },
+        company: { type: String, default: "", trim: true, maxlength: 120 },
         kind: { type: String, enum: ["Kapora", "Ara ödeme", "Teslimat ödemesi", "Tam ödeme"], required: true },
         paid_date: { type: String, required: true },
         note: { type: String, default: "", maxlength: 500 },
