@@ -105,7 +105,7 @@ export async function getAllProducts(req, res) {
             .populate("product_category", "category_name")
             .populate("product_brand", "brand_name")
             .populate("product_unit", "unit_name unit_code")
-            .sort({ createdAt: -1 })
+            .sort({ createdAt: -1, _id: -1 })
             .skip(skip)
             .limit(limit);
 
