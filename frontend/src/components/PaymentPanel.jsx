@@ -3,6 +3,7 @@ import api from "../libs/axios.js";
 import toast from "react-hot-toast";
 import { PAYMENT_KINDS, PAYMENT_METHODS, paymentSummary } from "../../../backend/src/libs/orderPayments.js";
 import { formatMoney } from "../libs/curtainCalculation.js";
+import MailOrderCompanyPortal from "./MailOrderCompanyPortal.jsx";
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const MAIL_ORDER_COMPANIES = ["DMR Line", "OBA Perdesan", "Lilium", "AS"];
 const newForm = () => ({ amount: "", kind: "Kapora", method: "Nakit", paid_date: today(), note: "", company: "", companyChoice: "" });
@@ -91,6 +92,7 @@ export default function PaymentPanel({ sale, onUpdate }) {
           <label>Mail order firması<select className={fieldClass} value={form.companyChoice} onChange={(event) => { const choice = event.target.value; setForm((previous) => ({ ...previous, companyChoice: choice, company: choice === "other" ? "" : choice })); }} required><option value="">Firma seçin</option>{MAIL_ORDER_COMPANIES.map((company) => <option key={company}>{company}</option>)}<option value="other">Diğer firma</option></select></label>
           {form.companyChoice === "other" && <label className="block mt-3">Firma adı<input className={fieldClass} value={form.company} onChange={(event) => update("company", event.target.value)} maxLength={120} required /></label>}
           <p className="mt-2 text-sm text-[#806b56]">Firma bu tahsilatın yanında saklanır. Cari hesabından otomatik düşüm henüz yapılmaz.</p>
+          <MailOrderCompanyPortal company={form.company} />
         </div>}
         <label>Tahsilat tarihi<input className={fieldClass} type="date" value={form.paid_date} onChange={(event) => update("paid_date",event.target.value)} required /></label>
         <label className="sm:col-span-2">Tahsilat notu<input className={fieldClass} value={form.note} onChange={(event) => update("note",event.target.value)} maxLength={500} placeholder="Örn. mail order çekilen firma veya havale açıklaması" /></label>
