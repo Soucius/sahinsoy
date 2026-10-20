@@ -10,6 +10,17 @@ const isApprovedWork=sale=>sale.status==='tamamlandi'||sale.status==='teslim_edi
 const matchesTab=(sale,tab)=>tab==='payment_pending'?isApprovedWork(sale)&&paymentSummary(sale).balance>0:sale.status===tab;
 const approvalMonth=sale=>new Date(sale.approved_at||(sale.status==='teslim_edildi'?sale.createdAt:sale.updatedAt||sale.createdAt)).toLocaleDateString('sv-SE').slice(0,7);
 const measurementLabel=sale=>sale.measurement_status==='confirmed'?'Ölçü teyit edildi':sale.measurement_status==='scheduled'?'Ölçü planlandı':'Ön ölçü';
+const paymentGroups=sale=>{
+  const groups=new Map();
+  for(const entry of paymentSummary(sale).records){
+    if(entry.voided_at)continue;
+    const company=entry.method==='Mail Order'?entry.company||'':'';
+    const key=JSON.stringify([entry.method,entry.kind,company]);
+    if(!groups.has(key))groups.set(key,{key,method:entry.method,kind:entry.kind,company,cents:0});
+    groups.get(key).cents+=Math.round(Number(entry.amount)*100);
+  }
+  return [...groups.values()];
+};
 export default function SalesPage(){
   const [sales,setSales]=useState([]),[loading,setLoading]=useState(true),[tab,setTab]=useState('beklemede'),[search,setSearch]=useState(''),[month,setMonth]=useState(new Date().toLocaleDateString('sv-SE').slice(0,7)),[busy,setBusy]=useState(null);
   const [cancelTarget,setCancelTarget]=useState(null);
@@ -85,6 +96,7 @@ export default function SalesPage(){
         <div><h2 className="font-bold text-lg">{sale.customer_name||'Müşteri adı girilmedi'}</h2><p>#{sale._id.slice(-8).toUpperCase()} · {new Date(sale.createdAt).toLocaleDateString('tr-TR')}</p><p>Telefon: {sale.customer_phone||'—'} · Teslim: {sale.delivery_date?new Date(sale.delivery_date).toLocaleDateString('tr-TR'):'—'}</p><p>{sale.delivery_method==='montaj'||sale.delivery_method==='installation'?'Montaj':'Mağaza teslimi'} · {sale.sale_items.length} ürün kalemi</p></div>
         <div className="text-right"><strong className="text-2xl">{money(sale.grand_total)}</strong><p>İskonto %{Number(sale.discount_percent||0).toLocaleString('tr-TR')} · {money(sale.discount_amount)}</p>{(isApprovedWork(sale)||paymentSummary(sale).paid>0)&&<p>Tahsilat: {money(paymentSummary(sale).paid)} · {paymentSummary(sale).credit>0?'Müşteri alacağı':'Kalan'}: {money(paymentSummary(sale).credit||paymentSummary(sale).balance)}</p>}</div>
       </div>
+      {paymentSummary(sale).paid>0&&<section aria-label="Alınan ödemeler" className="mt-4 rounded-xl border border-[#d8c6ae] bg-[#fffaf2] p-3 text-sm text-[#593d29]"><h3 className="font-semibold mb-2">Alınan ödemeler</h3>{paymentGroups(sale).map(group=><p key={group.key} className="flex flex-wrap justify-between gap-x-4 gap-y-1 py-1"><span>{group.method} · {group.kind}{group.company?` · ${group.company}`:''}</span><strong>{money(group.cents/100)}</strong></p>)}</section>}
       <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-[#593d29]">{isApprovedWork(sale)&&<span className="rounded-full border border-[#d8c6ae] bg-[#f4ecdf] px-3 py-2 font-semibold">{paymentSummary(sale).statusLabel}</span>}<span className="rounded-full border border-[#d8c6ae] bg-[#f4ecdf] px-3 py-2 font-semibold">{measurementLabel(sale)}</span>{sale.measurement_date&&<span>Ölçü tarihi: {new Date(sale.measurement_date).toLocaleDateString('tr-TR')}</span>}{sale.measurement_master&&<span>Usta: {sale.measurement_master}</span>}{Number(sale.measurement_revision)>0&&<span>Revizyon {sale.measurement_revision}</span>}</div>
       {sale.status==='iptal'&&<p className="mt-4 text-gray-600"><strong>Sipariş iptal edildi.</strong>{sale.cancelled_at?` İptal tarihi: ${new Date(sale.cancelled_at).toLocaleString('tr-TR')}.`:''} Kayıt geçmişte korunur.</p>}
       {sale.status==='iptal'&&sale.stock_restoration_pending&&<p className="mt-3 rounded-lg bg-amber-50 border border-amber-200 p-3">Stok iadesi otomatik tamamlanamadı. Ürünlerin stok miktarlarını kontrol edin.</p>}
