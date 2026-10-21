@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import api from '../libs/axios';
 import { hasManufacturingItems, openCurtainPrint } from '../libs/curtainPrint';
 import { buildMeasurementRevision, changeMeasurementForms, measurementFormForLine, measurementLineGroups } from '../../../backend/src/libs/orderMeasurement.js';
-import { isRusticProduct, needsControlDirection } from '../libs/curtainCalculation.js';
+import { usesWidthOnlyMeasurements, measurementSourceLabel, needsControlDirection } from '../libs/curtainCalculation.js';
 const money = value => Number(value || 0).toLocaleString('tr-TR', {
   style: 'currency',
   currency: 'TRY'
@@ -28,6 +28,7 @@ const input = 'mt-2 w-full rounded-xl border border-[#c8ad8c] px-3 py-3 text-lg 
 function metadataFor(sale) {
   return {
     measurement_date: sale.measurement_date ? String(sale.measurement_date).slice(0, 10) : '',
+    measurement_source: sale.measurement_source || 'unspecified',
     measurement_master: sale.measurement_master || '',
     measurement_note: sale.measurement_note || ''
   };
@@ -51,7 +52,7 @@ function dims(line) {
   if (line.mode === 'fon' && line.panels?.length) {
     return line.panels.map(panel => `${panel.label}: ${number(panel.width)} × ${number(panel.height)} cm`).join(' · ');
   }
-  return isRusticProduct(line) ? `En ${number(line.width)} cm` : `${number(line.width)} × ${number(line.height)} cm`;
+  return usesWidthOnlyMeasurements(line) ? `En ${number(line.width)} cm` : `${number(line.width)} × ${number(line.height)} cm`;
 }
 function dualDetails(line) {
   const dual = line.dual_plise;
@@ -155,7 +156,7 @@ function MeasurementLine({
         <span className="mt-2 block text-sm font-normal text-[#6f5843]">İmalat içindir. Kasa farkı parçaların gerçek enleri toplamıyla hesaplanır.</span>
       </label>}
     </div> : <>
-      <DimensionInputs value={form} hideHeight={isRusticProduct(line)} widthLabel={dual ? 'Ortak cam eni (cm)' : team ? 'Sol kanat eni (cm)' : line.mode === 'textile' ? 'Toplam en (cm)' : 'En (cm)'} heightLabel={dual ? `${dual.role === 'tul' ? 'Tül' : 'Güneşlik'} boyu (cm)` : team ? 'Sol kanat boyu (cm)' : 'Boy (cm)'} onChange={onChange} />
+      <DimensionInputs value={form} hideHeight={usesWidthOnlyMeasurements(line)} widthLabel={dual ? 'Ortak cam eni (cm)' : team ? 'Sol kanat eni (cm)' : line.mode === 'textile' ? 'Toplam en (cm)' : 'En (cm)'} heightLabel={dual ? `${dual.role === 'tul' ? 'Tül' : 'Güneşlik'} boyu (cm)` : team ? 'Sol kanat boyu (cm)' : 'Boy (cm)'} onChange={onChange} />
       {team && <div className="mt-4">
         <DimensionInputs value={{
           width: form.right_width,
@@ -175,6 +176,7 @@ function RevisionHistory({
     <summary className="cursor-pointer font-semibold">Revizyon {entry.revision} · {entry.kind === 'plan' ? 'Ölçü randevusu' : 'Ölçü teyidi'} · {dateTime(entry.changed_at)}</summary>
     <div className="mt-4 space-y-3 text-[#593d29]">
       <p>Kaydı yapan: {actorLabel(entry.changed_by)} · Usta: {entry.after?.measurement_master || 'Belirtilmedi'}</p>
+      <p>{measurementSourceLabel(entry.before?.measurement_source)} → {measurementSourceLabel(entry.after?.measurement_source)}</p>
       <p>Ölçü tarihi: {date(entry.after?.measurement_date)} · Durum: {statusLabel(entry.after?.measurement_status)}</p>
       {entry.after?.measurement_note && <p className="whitespace-pre-wrap">Not: {entry.after.measurement_note}</p>}
       {entry.kind === 'measurement' && <>
@@ -202,6 +204,7 @@ export default function SaleMeasurementPage() {
   const [sale, setSale] = useState(null);
   const [measurements, setMeasurements] = useState([]);
   const [metadata, setMetadata] = useState({
+    measurement_source: 'unspecified',
     measurement_date: '',
     measurement_master: '',
     measurement_note: ''
@@ -318,7 +321,7 @@ export default function SaleMeasurementPage() {
     }
   };
   const validMetadata = (planning = false) => {
-    if (!metadata.measurement_master.trim()) {
+    if ((planning || metadata.measurement_source === 'team') && !metadata.measurement_master.trim()) {
       toast.error('Ölçüyü alacak / alan ustanın adını girin.');
       return false;
     }
@@ -330,7 +333,7 @@ export default function SaleMeasurementPage() {
   };
   const reconcile = async request => {
     const record = await fetchRecord();
-    const completed = request.kind === 'measurement' ? record.measurement_history?.some(entry => entry.request_id === request.client_request_id) : record.measurement_history?.some(entry => entry.kind === 'plan' && entry.revision === request.expected_revision + 1 && (entry.after?.measurement_master || '') === request.measurement_master && (entry.after?.measurement_note || '') === request.measurement_note && String(entry.after?.measurement_date || '').slice(0, 10) === request.measurement_date);
+    const completed = request.kind === 'measurement' ? record.measurement_history?.some(entry => entry.request_id === request.client_request_id) : record.measurement_history?.some(entry => entry.kind === 'plan' && entry.revision === request.expected_revision + 1 && (entry.after?.measurement_source || 'unspecified') === request.measurement_source && (entry.after?.measurement_master || '') === request.measurement_master && (entry.after?.measurement_note || '') === request.measurement_note && String(entry.after?.measurement_date || '').slice(0, 10) === request.measurement_date);
     if (completed) {
       applyRecord(record);
       toast.success(request.kind === 'measurement' ? 'Yeni ölçüler ve güncel sipariş tutarı kaydedildi.' : 'Ölçü randevusu kaydedildi.');
@@ -452,7 +455,7 @@ export default function SaleMeasurementPage() {
   };
   if (loading) return <div className={card} role="status">Sipariş ve ölçü bilgileri yükleniyor…</div>;
   if (!sale) return <div className={`${card} space-y-4`}>
-    <h1 className="text-2xl font-bold">Ölçü / Teyit</h1>
+    <h1 className="text-2xl font-bold">Ölçü alınacak / Ölçü bilgileri</h1>
     <p role="alert">{loadError || 'Sipariş bulunamadı.'}</p>
     <div className="flex flex-wrap gap-3">
       <button onClick={reload} disabled={busy} className={secondary}>Tekrar dene</button>
@@ -462,7 +465,7 @@ export default function SaleMeasurementPage() {
   return <div className="mx-auto max-w-6xl space-y-5 text-[#392b22]">
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h1 className="text-3xl font-bold">Ölçü / Teyit</h1>
+        <h1 className="text-3xl font-bold">Ölçü alınacak / Ölçü bilgileri</h1>
         <p className="mt-2 text-[#6f5843]">Ön ölçüyle alınan siparişe evdeki son ölçüleri girin. Ürün ve işçilik birim fiyatları aynı kalır.</p>
       </div>
       <Link to="/dashboard/sales" className={secondary}>Sipariş takibine dön</Link>
@@ -475,11 +478,11 @@ export default function SaleMeasurementPage() {
           <p className="mt-1">Telefon: {sale.customer_phone || '—'} · Teslim: {date(sale.delivery_date)}</p>{sale.customer_address && <p className="mt-1 whitespace-pre-wrap">Adres: {sale.customer_address}</p>}</div>
         <div className="text-right">
           <span className="inline-block rounded-full bg-[#eee1d0] px-4 py-2 font-bold">{statusLabel(sale.measurement_status)}</span>
-          <p className="mt-2">Revizyon {revisionOf(sale)}</p>
+          <p className="mt-2">{measurementSourceLabel(sale.measurement_source)}</p><p className="mt-2">Revizyon {revisionOf(sale)}</p>
           <strong className="mt-2 block text-2xl">{money(sale.grand_total)}</strong>
         </div>
       </div>
-      {sale.measurement_status !== 'confirmed' && <p className="mt-4 rounded-xl border border-[#d8bd8e] bg-[#fff4da] p-4 font-semibold">Ölçüler henüz teyit edilmedi. İmalata geçmeden önce ustanın aldığı ölçüleri kaydedip teyit edin.</p>}
+      {sale.measurement_status !== 'confirmed' && <p className="mt-4 rounded-xl border border-[#d8bd8e] bg-[#fff4da] p-4 font-semibold">Ölçüler henüz teyit edilmedi. İmalata geçmeden önce son ölçüleri ve ölçüyü alan kişiyi kaydedip teyit edin.</p>}
       {!editable(sale) && <p className="mt-4" role="alert">İptal edilen, teslim edilen veya kaybedilen siparişlerde ölçü değiştirilemez.</p>}
     </section>
 
@@ -495,8 +498,9 @@ export default function SaleMeasurementPage() {
     </section>}
 
     <section className={card}>
-      <h2 className="text-xl font-bold">Ölçü randevusu ve usta bilgisi</h2>
+      <h2 className="text-xl font-bold">Ölçüyü alan kişi ve randevu</h2>
       <fieldset disabled={locked || Boolean(review)} className="mt-4 space-y-4">
+        <label className="block font-semibold">Ölçüyü kim aldı?<select className={input} value={metadata.measurement_source} onChange={event => { setMetadata(previous => ({ ...previous, measurement_source: event.target.value })); requestRef.current = null; }}><option value="unspecified">Belirtilmedi</option><option value="customer">Müşteri ölçüsü</option><option value="team">Ekibimiz ölçtü</option></select></label>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="font-semibold">Ölçü tarihi<input type="date" className={input} value={metadata.measurement_date} onChange={event => {
               setMetadata(previous => ({
@@ -532,7 +536,7 @@ export default function SaleMeasurementPage() {
 
     <section className="space-y-4">
       <div>
-        <h2 className="text-2xl font-bold">Ustanın aldığı yeni ölçüler</h2>
+        <h2 className="text-2xl font-bold">Yeni ölçüler</h2>
         <p className="mt-2 text-[#6f5843]">Tüm ölçüler santimetredir. Ürün, renk / VR, pile, parça sayısı ve aksesuar seçimi korunur.</p>
       </div>
       <fieldset disabled={locked || Boolean(review)} className="space-y-4">{measurements.length > 0 && measurementLineGroups(sale.pos_details?.cart || []).map(({ line, index, partner, motor }) => partner
