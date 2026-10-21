@@ -3,12 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { productionApi } from '../libs/productionApi';
 export default function ProductionSigninPage() {
-  const [username, setUsername] = useState(''), [password, setPassword] = useState(''), [busy, setBusy] = useState(false);
+  const [name, setName] = useState(''), [password, setPassword] = useState(''), [busy, setBusy] = useState(false);
   const navigate = useNavigate();
   async function submit(event) {
     event.preventDefault(); if (busy) return; setBusy(true);
     try {
-      const { data } = await productionApi().post('/staff/login', { username: username.trim().toLowerCase(), password });
+      const { data } = await productionApi().post('/staff/login', { name: name.trim(), password });
       localStorage.setItem('production_token', data.token); setPassword(''); navigate('/uretim', { replace: true });
     } catch (error) { toast.error(error.response?.data?.message || 'Giriş yapılamadı. Bağlantınızı kontrol edin.'); }
     finally { setBusy(false); }
@@ -19,7 +19,7 @@ export default function ProductionSigninPage() {
       <h1 className="text-3xl font-bold text-center mt-4">Üretim paneli</h1>
       <p className="text-center mt-3 mb-7 text-[#78634f]">Size atanan kesim, dikim ve montaj işleri.</p>
       <form onSubmit={submit} className="space-y-5">
-        <label className="block font-semibold">Kullanıcı adı<input className="block w-full border rounded-xl px-4 mt-2" autoComplete="username" required maxLength={40} value={username} onChange={e => setUsername(e.target.value)} /></label>
+        <label className="block font-semibold">Ad soyad<input className="block w-full border rounded-xl px-4 mt-2" autoComplete="username" autoCapitalize="words" required maxLength={80} placeholder="Örn. Nevzat Bilen" value={name} onChange={e => setName(e.target.value)} /></label>
         <label className="block font-semibold">Parola<input className="block w-full border rounded-xl px-4 mt-2" type="password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} /></label>
         <button className="w-full rounded-xl bg-[#754b2e] text-white font-bold px-5" disabled={busy}>{busy ? 'Giriş yapılıyor…' : 'Üretim paneline gir'}</button>
       </form>
