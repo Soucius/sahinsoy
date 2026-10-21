@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 const schema = new mongoose.Schema({
   name: { type: String, required: true, maxlength: 80 },
-  username: { type: String, required: true, unique: true, maxlength: 40 },
+  username: { type: String, required: true, unique: true, maxlength: 80 },
   password_hash: { type: String, required: true, select: false },
   duties: { type: [String], enum: ['cutting', 'sewing', 'installation'], required: true },
   active: { type: Boolean, default: true },
