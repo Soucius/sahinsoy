@@ -18,6 +18,7 @@ const saleItemSchema = new mongoose.Schema({
 const saleSchema = new mongoose.Schema({
     client_request_id: { type: String, unique: true, sparse: true },
     measurement_status: { type: String, enum: ["preliminary", "scheduled", "confirmed"], default: "preliminary" },
+    measurement_source: { type: String, enum: ["unspecified", "customer", "team"], default: "unspecified" },
     measurement_date: { type: Date, default: null },
     measurement_master: { type: String, default: "", maxlength: 120 },
     measurement_note: { type: String, default: "", maxlength: 2000 },
@@ -64,6 +65,7 @@ const saleSchema = new mongoose.Schema({
         method: { type: String, enum: ["Nakit", "Havale / EFT", "Kredi Kartı", "Mail Order"], required: true },
         company: { type: String, default: "", trim: true, maxlength: 120 },
         kind: { type: String, enum: ["Kapora", "Ara ödeme", "Teslimat ödemesi", "Tam ödeme"], required: true },
+        mark_delivered: { type: Boolean, default: false },
         paid_date: { type: String, required: true },
         note: { type: String, default: "", maxlength: 500 },
         recorded_at: { type: Date, required: true },
