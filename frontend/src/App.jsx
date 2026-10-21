@@ -17,6 +17,8 @@ import CategoriesPage from "./pages/CategoriesPage";
 import SalesPage from "./pages/SalesPage";
 import SalePaymentsPage from "./pages/SalePaymentsPage.jsx";
 import SaleMeasurementPage from "./pages/SaleMeasurementPage";
+import ProductionPage from "./pages/ProductionPage";
+import ProductionSigninPage from "./pages/ProductionSigninPage";
 
 function App() {
   return (
@@ -28,6 +30,8 @@ function App() {
         <Route path="/signin" element={<SigninPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/uretim/giris" element={<ProductionSigninPage />} />
+        <Route path="/uretim" element={<ProductionPage />} />
         <Route element={<ProtectedRoute />}>
           <Route path="/dashboard" element={<DashboardLayout />}>
             <Route index element={<DashboardPage />} />
@@ -38,6 +42,7 @@ function App() {
             <Route path="pos" element={<PosPage />} />
             <Route path="categories" element={<CategoriesPage />} />
             <Route path="sales" element={<SalesPage />} />
+            <Route path="production" element={<ProductionPage admin />} />
             <Route path="sales/:id/payments" element={<SalePaymentsPage />} />
             <Route path="sales/:id/measurements" element={<SaleMeasurementPage />} />
           </Route>
