@@ -5,7 +5,7 @@ import Sale from '../models/Sale.js';
 import ProductionStaff from '../models/ProductionStaff.js';
 import ProductionOrder from '../models/ProductionOrder.js';
 import { ENV } from '../libs/env.js';
-import { STAFF_PRESETS, DUTIES } from '../libs/productionAccess.js';
+import { STAFF_PRESETS, DUTIES, cleanStaffName, staffLoginKey, staffNamePattern } from '../libs/productionAccess.js';
 import { ProductionError, productionLines, fingerprint, visibleOrder, applyJobChange, stageChoices, notificationDraft } from '../libs/productionWorkflow.js';
 const populate = query => query.populate({ path: 'sale_items.product', select: 'product_name product_category product_brand', populate: [{ path: 'product_category', select: 'category_name' }, { path: 'product_brand', select: 'brand_name' }] });
 const saleFields = 'sale_items pos_details customer_name customer_phone delivery_date delivery_method status measurement_revision measurement_status production_guard';
@@ -15,19 +15,22 @@ const revision = body => { if (!Number.isSafeInteger(body.expected_revision) || 
 const fail = (res, error) => res.status(error instanceof ProductionError ? error.status : error.code === 11000 ? 409 : 500).json({ message: error instanceof ProductionError ? error.message : error.code === 11000 ? 'Bu kayıt zaten var. Ekranı yenileyin.' : 'Üretim işlemi tamamlanamadı. Tekrar deneyin.' });
 const publicStaff = staff => ({ _id: String(staff._id), name: staff.name, username: staff.username, duties: staff.duties, active: staff.active, session_version: staff.session_version, access_history: staff.access_history });
 const attempts = new Map();
+const nameFilter = name => ({ $or: [{ username: staffLoginKey(name) }, { name: { $regex: staffNamePattern(name), $options: 'i' } }] });
 export async function staffLogin(req, res) {
   try {
-    bodyKeys(req.body, ['username', 'password']);
-    const key = `${req.ip}:${String(req.body.username || '').toLowerCase().slice(0, 40)}`;
+    bodyKeys(req.body, ['name', 'username', 'password']);
+    const loginName = req.body.name ?? req.body.username;
+    const key = `${req.ip}:${staffLoginKey(loginName).slice(0, 80)}`;
     const now = Date.now();
     for (const [key, entry] of attempts) if (entry.until < now) attempts.delete(key);
     const limit = attempts.get(key) || { count: 0, until: now + 15 * 60 * 1000 };
     if (limit.count >= 10) return res.status(429).json({ message: 'Çok sayıda giriş denemesi yapıldı. 15 dakika sonra deneyin.' });
     limit.count++; attempts.set(key, limit);
-    const { username, password } = req.body;
-    if (typeof username !== 'string' || !/^[a-z0-9._-]{3,40}$/i.test(username) || typeof password !== 'string' || Buffer.byteLength(password) > 72) throw new ProductionError('Kullanıcı adı veya parola yanlış.', 401);
-    const staff = await ProductionStaff.findOne({ username: username.toLowerCase(), active: true }).select('+password_hash');
-    if (!staff || !await bcrypt.compare(password, staff.password_hash)) throw new ProductionError('Kullanıcı adı veya parola yanlış.', 401);
+    const { password } = req.body;
+    if (typeof loginName !== 'string' || !cleanStaffName(loginName) || loginName.length > 80 || typeof password !== 'string' || Buffer.byteLength(password) > 72) throw new ProductionError('Ad soyad veya parola yanlış.', 401);
+    const matches = await ProductionStaff.find({ ...nameFilter(loginName), active: true }).select('+password_hash').limit(2);
+    const staff = matches.length === 1 ? matches[0] : null;
+    if (!staff || !await bcrypt.compare(password, staff.password_hash)) throw new ProductionError('Ad soyad veya parola yanlış.', 401);
     attempts.delete(key);
     const token = jwt.sign({ id: String(staff._id), scope: 'production', version: staff.session_version }, ENV.JWT_SECRET, { audience: 'sahinsoy-production', expiresIn: '12h' });
     res.json({ token, staff: { name: staff.name, duties: staff.duties } });
@@ -41,11 +44,11 @@ export async function getStaff(req, res) {
 function staffInput(body, creating) {
   bodyKeys(body, ['name', 'username', 'password', 'duties', 'active', 'expected_version']);
   const data = {};
-  for (const key of ['name', 'username']) if (creating || body[key] !== undefined) {
-    if (typeof body[key] !== 'string' || !body[key].trim() || body[key].length > (key === 'name' ? 80 : 40)) throw new ProductionError('Ad ve kullanıcı adını kontrol edin.');
-    data[key] = body[key].trim();
+  if (creating || body.name !== undefined) {
+    if (typeof body.name !== 'string' || !cleanStaffName(body.name) || body.name.length > 80 || /[\u0000-\u001f\u007f]/u.test(body.name)) throw new ProductionError('Personelin adını ve soyadını kontrol edin.');
+    data.name = cleanStaffName(body.name);
+    data.username = staffLoginKey(data.name);
   }
-  if (data.username) { data.username = data.username.toLowerCase(); if (!/^[a-z0-9._-]{3,40}$/.test(data.username)) throw new ProductionError('Kullanıcı adı 3–40 harf/rakam olmalı; Türkçe karakter veya boşluk içermemeli.'); }
   if (creating || body.duties !== undefined) {
     if (!Array.isArray(body.duties) || !body.duties.length || body.duties.some(d => !DUTIES[d]) || new Set(body.duties).size !== body.duties.length) throw new ProductionError('En az bir görev seçin.');
     data.duties = body.duties;
@@ -57,9 +60,15 @@ function staffInput(body, creating) {
   }
   return data;
 }
+async function ensureStaffNameAvailable(data, exceptId) {
+  if (!data.name) return;
+  const duplicate = await ProductionStaff.findOne({ ...nameFilter(data.name), ...(exceptId ? { _id: { $ne: exceptId } } : {}) }).select('_id');
+  if (duplicate) throw new ProductionError('Bu ad ve soyadla bir personel hesabı zaten var. Mevcut hesabı düzenleyin.', 409);
+}
 export async function createStaff(req, res) {
   try {
     const data = staffInput(req.body, true);
+    await ensureStaffNameAvailable(data);
     data.password_hash = await bcrypt.hash(data.password, 12); delete data.password;
     const staff = await ProductionStaff.create({ ...data, created_by: req.productionActor._id, access_history: [{ at: new Date(), by: req.productionActor.name, action: 'Personel hesabı oluşturuldu' }] });
     res.status(201).json(publicStaff(staff));
@@ -69,9 +78,11 @@ export async function updateStaff(req, res) {
   try {
     const data = staffInput(req.body, false);
     if (!Number.isSafeInteger(req.body.expected_version)) throw new ProductionError('Personel ekranını yenileyin.', 409);
+    const staffId = id(req.params.id);
+    await ensureStaffNameAvailable(data, staffId);
     const passwordReset = Boolean(data.password);
     if (data.password) { data.password_hash = await bcrypt.hash(data.password, 12); delete data.password; }
-    const staff = await ProductionStaff.findOneAndUpdate({ _id: id(req.params.id), session_version: req.body.expected_version }, {
+    const staff = await ProductionStaff.findOneAndUpdate({ _id: staffId, session_version: req.body.expected_version }, {
       $set: data, $inc: { session_version: 1 }, $push: { access_history: { at: new Date(), by: req.productionActor.name, action: `Giriş / görev izinleri güncellendi${passwordReset ? '; parola yenilendi' : ''}` } },
     }, { new: true, runValidators: true });
     if (!staff) throw new ProductionError('Personel bilgileri değişmiş. Ekranı yenileyin.', 409);
