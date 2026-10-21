@@ -6,7 +6,7 @@ import { formatMoney } from "../libs/curtainCalculation.js";
 import MailOrderCompanyPortal from "./MailOrderCompanyPortal.jsx";
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const MAIL_ORDER_COMPANIES = ["DMR Line", "OBA Perdesan", "Lilium", "AS"];
-const newForm = () => ({ amount: "", kind: "Kapora", method: "Nakit", paid_date: today(), note: "", company: "", companyChoice: "" });
+const newForm = () => ({ amount: "", kind: "Kapora", method: "Nakit", paid_date: today(), note: "", company: "", companyChoice: "", mark_delivered: false });
 const key = () => globalThis.crypto?.randomUUID?.() || `pay-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const fieldClass = "block w-full rounded-lg border border-[#d8c6ae] bg-[#fffdf8] p-3 mt-1";
 export default function PaymentPanel({ sale, onUpdate }) {
@@ -27,26 +27,27 @@ export default function PaymentPanel({ sale, onUpdate }) {
     return record;
   };
   const accept = (record) => {
+    const deliveredWithPayment = Boolean(pending.current?.mark_delivered);
     onUpdate(record); pending.current = null; setUncertain(false);
-    setForm((previous) => ({ ...previous, amount: "", note: "", kind: "Teslimat ödemesi" }));
-    toast.success("Tahsilat kaydedildi. Kalan bakiye güncellendi.");
+    setForm((previous) => ({ ...previous, amount: "", note: "", kind: "Teslimat ödemesi", mark_delivered: false }));
+    toast.success(deliveredWithPayment ? "Tahsilat kaydedildi ve iş teslim edildi olarak işaretlendi." : "Tahsilat kaydedildi. Kalan bakiye güncellendi.");
   };
   const save = async (event) => {
     event.preventDefault();
     if (working.current || !canAdd) return;
-    const payload = pending.current || { kind: form.kind, method: form.method, paid_date: form.paid_date, note: form.note, company: form.method === "Mail Order" ? form.company.trim() : "", amount: Number(String(form.amount).replace(",", ".")), request_id: key(), expected_revision: sale.payment_revision || 0 };
+    const payload = pending.current || { mark_delivered: sale.status === "tamamlandi" && form.mark_delivered, kind: form.kind, method: form.method, paid_date: form.paid_date, note: form.note, company: form.method === "Mail Order" ? form.company.trim() : "", amount: Number(String(form.amount).replace(",", ".")), request_id: key(), expected_revision: sale.payment_revision || 0 };
     if (!Number.isFinite(payload.amount) || payload.amount <= 0) { toast.error("Tahsilat tutarını girin."); return; }
     if (payload.method === "Mail Order" && !payload.company) { toast.error("Mail order firmasını seçin."); return; }
     pending.current = payload; working.current = true; setBusy(true);
     try {
       const response = await api.post(`/sales/${sale._id}/payments`, payload);
-      if (response.data?._id !== sale._id || !response.data.payments?.some((entry) => entry.request_id === payload.request_id)) throw new Error("Tahsilat sonucu doğrulanamadı.");
+      if (response.data?._id !== sale._id || (payload.mark_delivered && response.data.status !== "teslim_edildi") || !response.data.payments?.some((entry) => entry.request_id === payload.request_id)) throw new Error("Tahsilat sonucu doğrulanamadı.");
       accept(response.data);
     } catch (error) {
       let confirmed = false;
       try {
         const record = await freshSale();
-        if (record.payments?.some((entry) => entry.request_id === payload.request_id)) { accept(record); confirmed = true; }
+        if ((!payload.mark_delivered || record.status === "teslim_edildi") && record.payments?.some((entry) => entry.request_id === payload.request_id)) { accept(record); confirmed = true; }
       } catch { /* Retry the same immutable request after an uncertain response. */ }
       if (!confirmed) {
         if (error.response?.status >= 400 && error.response.status < 500) { pending.current = null; setUncertain(false); }
@@ -76,7 +77,7 @@ export default function PaymentPanel({ sale, onUpdate }) {
     <p className="text-sm text-[#806b56]">Yalnız kaydedilen tahsilatlar hesaba katılır. Kapora ve ödemeler sipariş bedelini değiştirmez.</p>
     {canAdd && summary.balance > 0 && <div className="mt-4 rounded-xl border border-[#d8c6ae] p-3"><strong>Kalan ödeme planı</strong><p>{sale.payment_method || "Belirlenmedi"} · {sale.pos_details?.header?.balance_payment_due || "Belirlenmedi"}</p>{sale.pos_details?.header?.payment_plan_note && <p className="whitespace-pre-wrap">{sale.pos_details.header.payment_plan_note}</p>}</div>}
     {summary.records.length > 0 ? <div className="overflow-x-auto my-4"><table className="w-full text-left text-sm"><thead><tr>{["Tarih / tür", "Yöntem", "Tutar", "Kayıt"].map((label) => <th key={label} className="p-2 bg-[#efe0ca]">{label}</th>)}</tr></thead><tbody>{summary.records.map((entry) => <tr key={entry.request_id} className={entry.voided_at ? "text-[#806b56]" : ""}>
-      <td className="border-b border-[#e2d2bd] p-2">{entry.paid_date.split("-").reverse().join(".")}<br />{entry.kind}{entry.note && <p>{entry.note}</p>}</td><td className="border-b border-[#e2d2bd] p-2">{entry.method}{entry.company && <p className="font-semibold">{entry.company}</p>}</td><td className="border-b border-[#e2d2bd] p-2 whitespace-nowrap">{entry.voided_at ? <del>{formatMoney(entry.amount)}</del> : <strong>{formatMoney(entry.amount)}</strong>}</td><td className="border-b border-[#e2d2bd] p-2">{entry.voided_at ? <>Geçersiz kayıt<p>{entry.void_reason}</p></> : <button type="button" disabled={busy || uncertain} onClick={() => { setVoidTarget(entry.request_id); setReason(""); }} className="rounded-lg border p-2">Hatalı kaydı düzelt</button>}</td>
+      <td className="border-b border-[#e2d2bd] p-2">{entry.paid_date.split("-").reverse().join(".")}<br />{entry.kind}{entry.mark_delivered && <p>İş teslim edildi</p>}{entry.note && <p>{entry.note}</p>}</td><td className="border-b border-[#e2d2bd] p-2">{entry.method}{entry.company && <p className="font-semibold">{entry.company}</p>}</td><td className="border-b border-[#e2d2bd] p-2 whitespace-nowrap">{entry.voided_at ? <del>{formatMoney(entry.amount)}</del> : <strong>{formatMoney(entry.amount)}</strong>}</td><td className="border-b border-[#e2d2bd] p-2">{entry.voided_at ? <>Geçersiz kayıt<p>{entry.void_reason}</p></> : <button type="button" disabled={busy || uncertain} onClick={() => { setVoidTarget(entry.request_id); setReason(""); }} className="rounded-lg border p-2">Hatalı kaydı düzelt</button>}</td>
     </tr>)}</tbody></table></div> : <p className="my-4">Henüz tahsilat kaydı yok.</p>}
     {voidTarget && <div className="rounded-xl border border-[#d8c6ae] p-4 my-4" role="group" aria-label="Tahsilat kaydını düzelt">
       <p>Bu işlem yalnız hatalı kaydı geçersiz kılar; para iadesi yapmaz. Kayıt geçmişte korunur.</p>
@@ -96,9 +97,10 @@ export default function PaymentPanel({ sale, onUpdate }) {
         </div>}
         <label>Tahsilat tarihi<input className={fieldClass} type="date" value={form.paid_date} onChange={(event) => update("paid_date",event.target.value)} required /></label>
         <label className="sm:col-span-2">Tahsilat notu<input className={fieldClass} value={form.note} onChange={(event) => update("note",event.target.value)} maxLength={500} placeholder="Örn. mail order çekilen firma veya havale açıklaması" /></label>
+        {sale.status === "tamamlandi" && <label className="sm:col-span-2 rounded-xl border border-[#d8c6ae] bg-[#f4ecdf] p-4"><span className="flex items-center gap-3 font-semibold"><input type="checkbox" className="h-5 w-5" checked={form.mark_delivered} onChange={(event) => update("mark_delivered", event.target.checked)} />İş de teslim edildi</span><p className="mt-2 text-sm">Seçersen tahsilatla birlikte teslim kaydı da yapılır. Kalan bakiye varsa ödeme beklemede kalır.</p></label>}
       </fieldset>
       {uncertain && <p role="alert" className="mt-3 font-semibold">İşlem sonucu henüz doğrulanamadı. Yeni tahsilat girmeden aynı kaydı yeniden doğrulayın.</p>}
-      <div className="flex flex-wrap gap-3 mt-4"><button type="button" disabled={busy || uncertain || summary.balance <= 0} className="border rounded-lg p-3" onClick={() => setForm((previous) => ({ ...previous, amount: String(summary.balance), kind: summary.paid > 0 ? "Teslimat ödemesi" : "Tam ödeme" }))}>Kalanın tamamı</button><button type="submit" disabled={busy || (!uncertain && summary.balance <= 0)} className="rounded-lg bg-[#80512f] text-white px-5 py-3 font-semibold">{busy ? "Kaydediliyor…" : uncertain ? "Aynı kaydı yeniden doğrula" : "Tahsilatı kaydet"}</button></div>
+      <div className="flex flex-wrap gap-3 mt-4"><button type="button" disabled={busy || uncertain || summary.balance <= 0} className="border rounded-lg p-3" onClick={() => setForm((previous) => ({ ...previous, amount: String(summary.balance), kind: summary.paid > 0 ? "Teslimat ödemesi" : "Tam ödeme" }))}>Kalanın tamamı</button><button type="submit" disabled={busy || (!uncertain && summary.balance <= 0)} className="rounded-lg bg-[#80512f] text-white px-5 py-3 font-semibold">{busy ? "Kaydediliyor…" : uncertain ? "Aynı kaydı yeniden doğrula" : form.mark_delivered && sale.status === "tamamlandi" ? "Tahsilatı kaydet ve teslim et" : "Tahsilatı kaydet"}</button></div>
     </form> : <p className="mt-4">Yeni tahsilat için sipariş onaylanmış olmalıdır.{sale.status === "iptal" && " İptal, daha önce alınan parayı otomatik iade etmez."}</p>}
   </section>;
 }
