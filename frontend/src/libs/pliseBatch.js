@@ -2,7 +2,8 @@ import { calculateCurtainLine, normalizeName, roundMoney, roundQuantity, usesWid
 
 export function supportsMeasurementBatch(product) {
   const category = normalizeName(product?.product_category?.category_name || product?.category_name);
-  return product?.calculation_type === "m2" && /plise|honeycomb/.test(category) || usesWidthOnlyMeasurements(product);
+  // Width-only rails include OBA decorative rails catalogued under ADA.
+  return usesWidthOnlyMeasurements(product) || (product?.calculation_type === "m2" && /plise|honeycomb/.test(category));
 }
 
 export function createMeasurementRow(values = {}) {
