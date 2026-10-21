@@ -13,7 +13,13 @@ async function changePayment(req, res, voiding) {
       const result = voiding ? paymentVoid(sale, req.params.paymentId, req.body, req.user._id) : paymentEntry(sale, req.body, req.user._id);
       if (!result.existing) {
         if (voiding) Object.assign(result.entry, result.changes);
-        else { if (!Array.isArray(sale.payments)) sale.payments = []; sale.payments.push(result.entry); }
+        else { if (!Array.isArray(sale.payments)) sale.payments = []; sale.payments.push(result.entry);
+          if (result.entry.mark_delivered && sale.status === "tamamlandi") {
+            const now = result.entry.recorded_at;
+            if (!sale.approved_at) sale.approved_at = sale.updatedAt || sale.createdAt || now;
+            sale.status = "teslim_edildi"; sale.delivered_at = now; sale.delivered_by = req.user._id;
+          }
+        }
         sale.payment_revision = (sale.payment_revision || 0) + 1;
         await sale.save({ session });
       }
