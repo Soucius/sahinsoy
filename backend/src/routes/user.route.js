@@ -6,7 +6,7 @@ import { requireProductionAdmin } from "../middlewares/production.middleware.js"
 const router = express.Router();
 
 router.get("/", protect, requireProductionAdmin, getAllUsers);
-router.post("/", createUser);
+router.post("/", protect, requireProductionAdmin, createUser);
 router.get("/:id", protect, getUserById);
 router.put("/:id", protect, updateUser);
 router.delete("/:id", protect, requireProductionAdmin, deleteUser);
