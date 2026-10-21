@@ -26,8 +26,11 @@ export function productionLines(sale) {
         item_note: text(line?.item_note || item.item_note, 1000),
         panels: (Array.isArray(line?.panels) ? line.panels : []).slice(0, 200).map(p => fields(p, ['label', 'width', 'height', 'cut_width'])),
         mechanical_panels: (Array.isArray(line?.mechanical_panels) ? line.mechanical_panels : []).slice(0, 200).map(p => fields(p, ['label', 'width', 'height', 'count', 'case_color', 'chain_direction', 'position', 'facade', 'variant'])),
-        accessories: (Array.isArray(line?.accessories) ? line.accessories : []).map(p => fields(p, ['name', 'color', 'count_per_piece'])),
-        case_color: text(line?.case_color), chain_direction: text(line?.chain_direction),
+        accessories: (Array.isArray(line?.accessories) ? line.accessories : []).map(p => fields(p, ['name', 'color', 'count_per_piece', 'quantity', 'unit'])),
+        case_color: text(line?.case_color || line?.dual_plise?.case_color), chain_direction: text(line?.chain_direction),
+        case_mode: text(line?.case_mode), case_count: number(line?.case_count), profile_width_cm: number(line?.profile_width_cm),
+        glass_label: text(line?.dual_plise?.glass_label), dual_group: text(line?.dual_plise?.group_id), dual_role: text(line?.dual_plise?.role),
+        motor_group: text(line?.motor_system?.group_id), motor_role: text(line?.motor_system?.role),
       },
     };
   });
