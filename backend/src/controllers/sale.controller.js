@@ -3,7 +3,7 @@ import Sale from "../models/Sale.js";
 import Product from "../models/Product.js";
 import {normalizeSale,SaleInputError} from "../libs/sale-validation.js";
 import {buildMeasurementRevision} from "../libs/orderMeasurement.js";
-const allowed=['sale_items','sub_total','discount_amount','discount_percent','credit_card_fee','grand_total','payment_method','status','customer_name','customer_phone','customer_address','delivery_date','delivery_method','sale_note','pos_details','client_request_id','measurement_status'];
+const allowed=['sale_items','sub_total','discount_amount','discount_percent','credit_card_fee','grand_total','payment_method','status','customer_name','customer_phone','customer_address','delivery_date','delivery_method','sale_note','pos_details','client_request_id','measurement_status','measurement_source'];
 const pick=data=>Object.fromEntries(allowed.filter(k=>data[k]!==undefined).map(k=>[k,data[k]]));
 const populate=q=>q.populate({path:'sale_items.product',select:'product_name product_barcode product_image calculation_type product_unit product_category product_brand stock_tracking stock_quantity sale_price variants currency',populate:[{path:'product_unit',select:'unit_name unit_code'},{path:'product_category',select:'category_name'},{path:'product_brand',select:'brand_name'}]}).populate('sold_by','user_username').populate('measurement_history.changed_by','user_username');
 async function deductStock(items,session){
@@ -35,15 +35,20 @@ async function restoreStock(sale,session){
 }
 function initialMeasurementStatus(input){
   if(input.measurement_status!==undefined&&!['preliminary','confirmed'].includes(input.measurement_status))throw new SaleInputError('İlk ölçü durumu ön ölçü veya teyit edilmiş ölçü olmalıdır. Ölçü randevusunu ayrı ekrandan kaydedin.');
+  if(input.measurement_source!==undefined&&!["unspecified","customer","team"].includes(input.measurement_source))throw new SaleInputError("Ölçüyü alan kişi seçimi geçersiz.");
   return input;
 }
 
 function measurementInput(body,revision){
   if(!body||typeof body!=='object'||Array.isArray(body))throw new SaleInputError('Ölçü bilgilerini kontrol edin.');
-  const fields=['measurement_date','measurement_master','measurement_note','expected_revision',...(revision?['measurements','client_request_id']:[])];
+  const fields=['measurement_source','measurement_date','measurement_master','measurement_note','expected_revision',...(revision?['measurements','client_request_id']:[])];
   if(Object.keys(body).some(key=>!fields.includes(key)))throw new SaleInputError('Bu ekranda yalnız ölçü ve randevu bilgileri güncellenebilir.');
   if(!Number.isSafeInteger(body.expected_revision)||body.expected_revision<0)throw new SaleInputError('Ölçü sürümü geçersiz; siparişi yeniden açın.');
   const result={expected_revision:body.expected_revision};
+  if(body.measurement_source!==undefined){
+    if(!["unspecified","customer","team"].includes(body.measurement_source))throw new SaleInputError("Ölçüyü alan kişi seçimi geçersiz.");
+    result.measurement_source=body.measurement_source;
+  }
   for(const [key,max] of [['measurement_master',120],['measurement_note',2000]]){
     if(body[key]===undefined)continue;
     if(typeof body[key]!=='string'||body[key].length>max||/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(body[key]))throw new SaleInputError(key==='measurement_master'?'Usta adını kontrol edin.':'Ölçü notunu kontrol edin.');
@@ -68,7 +73,7 @@ function measurementInput(body,revision){
 
 function measurementSnapshot(sale){
   const raw=sale.toObject();
-  const fields=['measurement_status','measurement_date','measurement_master','measurement_note','measurement_revision','pos_details','sale_items','sub_total','discount_amount','discount_percent','credit_card_fee','grand_total','stock_deductions'];
+  const fields=['measurement_status','measurement_source','measurement_date','measurement_master','measurement_note','measurement_revision','pos_details','sale_items','sub_total','discount_amount','discount_percent','credit_card_fee','grand_total','stock_deductions'];
   // Clone Mixed fields before replacing them: both sides of the audit must remain immutable.
   return JSON.parse(JSON.stringify(Object.fromEntries(fields.map(key=>[key,raw[key]??null]))));
 }
@@ -119,7 +124,7 @@ async function reviseStockDeductions(sale,newItems,session){
 }
 
 function recordMeasurement(sale,input,kind,userId,before){
-  for(const key of ['measurement_date','measurement_master','measurement_note'])if(input[key]!==undefined)sale[key]=input[key];
+  for(const key of ['measurement_source','measurement_date','measurement_master','measurement_note'])if(input[key]!==undefined)sale[key]=input[key];
   sale.measurement_status=kind==='measurement'?'confirmed':sale.measurement_date?'scheduled':'preliminary';
   sale.measurement_revision=(sale.measurement_revision||0)+1;
   sale.measurement_history.push({kind,revision:sale.measurement_revision,request_id:input.client_request_id||'',changed_at:new Date(),changed_by:userId,before,after:measurementSnapshot(sale)});
