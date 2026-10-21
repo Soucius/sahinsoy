@@ -1,4 +1,4 @@
-import { accessoryCountsFromLine, calculateCurtainLine, formatNumber, isRusticProduct, paymentConversion, PLEATS, productMode, roundMoney, roundQuantity, salePayload } from "./curtainCalculation.js";
+import { accessoryCountsFromLine, calculateCurtainLine, formatNumber, usesWidthOnlyMeasurements, paymentConversion, PLEATS, productMode, roundMoney, roundQuantity, salePayload } from "./curtainCalculation.js";
 import { validateDualPliseGroups } from "./dualPlise.js";
 import { validateMotorSystemGroups } from "./motorSystem.js";
 
@@ -99,7 +99,7 @@ export function measurementSummary(line) {
   if (line.dual_plise) return `${line.dual_plise.glass_label} · ${line.dual_plise.role === "tul" ? "Tül" : "Güneşlik"}: ${size(line)} · Kasa rengi: ${line.dual_plise.case_color || "Seçilmedi"}`;
   if (panels) return line.mechanical_panels.map((panel, index) => `${panel.position || `${index + 1}. parça`}: ${size(panel)}`).join(" · ");
   if (team) return `Sol: ${size(line.panels[0])} · Sağ: ${size(line.panels[1])}`;
-  return isRusticProduct(line) ? `En ${formatNumber(line.width)} cm` : size(line);
+  return usesWidthOnlyMeasurements(line) ? `En ${formatNumber(line.width)} cm` : size(line);
 }
 
 function frozenRules(line, product) {
