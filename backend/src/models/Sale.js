@@ -16,6 +16,7 @@ const saleItemSchema = new mongoose.Schema({
 
 
 const saleSchema = new mongoose.Schema({
+    production_guard: { type: Number, default: 0 },
     client_request_id: { type: String, unique: true, sparse: true },
     measurement_status: { type: String, enum: ["preliminary", "scheduled", "confirmed"], default: "preliminary" },
     measurement_source: { type: String, enum: ["unspecified", "customer", "team"], default: "unspecified" },
