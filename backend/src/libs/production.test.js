@@ -13,6 +13,7 @@ import { isProductionAdmin, STAFF_PRESETS } from './productionAccess.js';
 import { applyJobChange, fingerprint, notificationDraft, productionLines, stageChoices, visibleOrder } from './productionWorkflow.js';
 import { createProductionOrder, getProductionOrders, updateProductionJob, refreshProductionOrder, createStaff, updateStaff } from '../controllers/production.controller.js';
 import { updateUser } from '../controllers/user.controller.js';
+import userRoutes from '../routes/user.route.js';
 const ids = { admin: '100000000000000000000001', nevzat: '100000000000000000000002', nurten: '100000000000000000000003', hayati: '100000000000000000000004', sale: '200000000000000000000001', order: '300000000000000000000001', first: '400000000000000000000001', second: '400000000000000000000002', product: '500000000000000000000001' };
 const clone = x => structuredClone(x);
 const admin = { kind: 'admin', _id: ids.admin, name: 'TEST Yönetici', duties: [] };
@@ -27,7 +28,7 @@ function database(t, initialSale = sale(), initialOrder = order(initialSale)) {
   t.mock.method(mongoose, 'startSession', async () => ({ async withTransaction(work) { const before = clone(state); try { await work(); } catch (e) { Object.assign(state, before); throw e; } }, async endSession() {} }));
   t.mock.method(Sale, 'findById', () => query(() => state.sale));
   t.mock.method(Sale, 'find', () => query(() => [state.sale]));
-  t.mock.method(Sale, 'updateOne', async () => { state.writes++; return { modifiedCount: 1 }; });
+  t.mock.method(Sale, 'updateOne', async (_filter, _update, options) => { assert.equal(options.timestamps, false, 'production must preserve the financial report date'); state.writes++; return { modifiedCount: 1 }; });
   t.mock.method(ProductionOrder, 'find', () => query(() => state.order ? [state.order] : []));
   t.mock.method(ProductionOrder, 'findOne', () => query(() => state.order));
   t.mock.method(ProductionOrder, 'findById', () => query(() => state.order));
@@ -196,4 +197,12 @@ test('staff edits revoke old sessions and store only an audit description, never
   t.mock.method(ProductionStaff, 'findOneAndUpdate', async (_filter, change) => { update = change; return { _id: ids.nurten, name: 'Nurten', duties: ['sewing'], active: false, session_version: 1 }; });
   const res = response(); await updateStaff({ productionActor: admin, params: { id: ids.nurten }, body: { active: false, expected_version: 0 } }, res);
   assert.equal(res.statusCode, 200); assert.equal(update.$inc.session_version, 1); assert.equal(update.$set.active, false); assert.equal(JSON.stringify(res.body).includes('password'), false);
+});
+test('public signup cannot bypass staff isolation by creating a POS account', async () => {
+  const res = response();
+  await new Promise((resolve, reject) => {
+    const send = res.json.bind(res); res.json = value => { send(value); resolve(); return res; };
+    userRoutes.handle({ method: 'POST', url: '/', headers: {}, body: { user_username: 'unapproved-account' } }, res, reject);
+  });
+  assert.equal(res.statusCode, 401);
 });
