@@ -1,9 +1,8 @@
 import { Toaster } from "react-hot-toast";
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import HomePage from "./pages/HomePage";
 import ScrollToTopButton from "./components/ScrollToTopButton";
 import SigninPage from "./pages/SigninPage";
-import SignupPage from "./pages/SignupPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardLayout from "./layouts/DashboardLayout";
 import DashboardPage from "./pages/DashboardPage";
@@ -28,7 +27,7 @@ function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/signin" element={<SigninPage />} />
-        <Route path="/signup" element={<SignupPage />} />
+        <Route path="/signup" element={<Navigate to="/signin" replace />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/uretim/giris" element={<ProductionSigninPage />} />
         <Route path="/uretim" element={<ProductionPage />} />
