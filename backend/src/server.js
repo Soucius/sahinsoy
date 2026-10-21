@@ -13,6 +13,7 @@ import categoryRoutes from "./routes/category.route.js";
 import dashboardRoutes from "./routes/dashboard.route.js";
 import exchangeRateRoutes from "./routes/exchangeRate.route.js";
 import mailOrderCompanyRoutes from "./routes/mailOrderCompany.route.js";
+import productionRoutes from "./routes/production.route.js";
 
 const app = express();
 const PORT = ENV.PORT || 3000;
@@ -24,6 +25,7 @@ app.use(cors({
     optionsSuccessStatus: 200
 }));
 app.use("/api/users", userRoutes);
+app.use("/api/production", productionRoutes);
 app.use("/api/permissions", permissionRoutes);
 app.use("/api/roles", roleRoutes);
 app.use("/api/brands", brandRoutes);
