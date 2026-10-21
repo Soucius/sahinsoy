@@ -111,7 +111,8 @@ async function transaction(work) {
 async function lockedSale(saleId, session) {
   const sale = await populate(Sale.findById(saleId).select(saleFields).session(session)).lean();
   if (!sale || sale.status !== 'tamamlandi') throw new ProductionError('Yalnız onaylanan, henüz teslim edilmemiş siparişlerde işlem yapılabilir.', 409);
-  await Sale.updateOne({ _id: sale._id }, { $inc: { production_guard: 1 } }, { session });
+  // Lock the sale document without changing its financial report / approval fallback date.
+  await Sale.updateOne({ _id: sale._id }, { $inc: { production_guard: 1 } }, { session, timestamps: false });
   return sale;
 }
 export async function createProductionOrder(req, res) {
