@@ -52,7 +52,7 @@ function staffInput(body, creating) {
   }
   if (body.active !== undefined) { if (typeof body.active !== 'boolean') throw new ProductionError('Giriş izni geçersiz.'); data.active = body.active; }
   if (creating || body.password) {
-    if (typeof body.password !== 'string' || body.password.length < 12 || Buffer.byteLength(body.password) > 72) throw new ProductionError('Parola en az 12 karakter, en fazla 72 bayt olmalı.');
+    if (typeof body.password !== 'string' || body.password.length < 6 || Buffer.byteLength(body.password) > 72) throw new ProductionError('Parola en az 6 karakter, en fazla 72 bayt olmalı.');
     data.password = body.password;
   }
   return data;
