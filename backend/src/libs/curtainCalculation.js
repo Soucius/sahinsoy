@@ -91,6 +91,17 @@ export function supportsFoldingPanels(product) {
     && /5\s*\+\s*1(?!\d)/.test(product.product_name || "");
 }
 
+export function usesWidthOnlyMeasurements(product) {
+  const type = product?.calculation_type || product?.calc_type;
+  const normalized = { ...product, calculation_type: type };
+  if (supportsFoldingPanels(normalized) || isObaFoldingProduct(normalized)) return false;
+  const category = normalizeName(product?.product_category?.category_name || product?.category_name);
+  return isRusticProduct(product) || type === "mt" && ["dekoratif ray", "ray", "ray sistemleri", "alinlik"].includes(category);
+}
+
+export const measurementSourceLabel = (source) => ({ customer: "Müşteri ölçüsü", team: "Ekibimiz ölçtü" })[source] || "Ölçüyü alan: Belirtilmedi";
+export const validMeasurementSource = (source) => ["unspecified", "customer", "team"].includes(source);
+
 export function mechanicalPanelPosition(index, count) {
   if (count === 1) return "Tek parça";
   if (index === 0) return "Sol";
@@ -102,7 +113,7 @@ export function defaultMeasurement(product) {
   const mode = productMode(product);
   return {
     room_name: "Salon", area: "", facade: "", window_name: "", variant: "", item_note: "",
-    width: hasRusticSizePrices(product) ? "" : product.fixed_dimensions?.width_cm ? String(product.fixed_dimensions.width_cm) : mode === "fon" ? "80" : "", height: isRusticProduct(product) ? "" : product.fixed_dimensions?.height_cm ? String(product.fixed_dimensions.height_cm) : mode === "standard" ? "" : "260", count: "1", order_mode: mode === "fon" ? "takim" : "adet",
+    width: hasRusticSizePrices(product) ? "" : product.fixed_dimensions?.width_cm ? String(product.fixed_dimensions.width_cm) : mode === "fon" ? "80" : "", height: usesWidthOnlyMeasurements(product) ? "" : product.fixed_dimensions?.height_cm ? String(product.fixed_dimensions.height_cm) : mode === "standard" ? "" : "260", count: "1", order_mode: mode === "fon" ? "takim" : "adet",
     right_width: "80", right_height: "260", separate_right: false, pleat_id: "sik", labor_price: "0", currency_rate: "",
     ...(needsControlDirection(product) ? { chain_direction: "" } : {}),
     ...(supportsFoldingPanels(product) || needsControlDirection(product) && product.calculation_type === "m2" ? { case_mode: "ayri", mechanical_panels: [], profile_width_cm: "" } : {}),
@@ -178,7 +189,7 @@ export function accessoryCountsFromLine(line) {
 
 export function validateProductDimensions(product, width, height) {
   const fixed = product.fixed_dimensions || {};
-  if ((fixed.width_cm > 0 && width !== fixed.width_cm) || (fixed.height_cm > 0 && height !== fixed.height_cm)) throw new Error("Seçilen ürün sabit ölçülüdür; farklı ölçü için uygun ürünü seçin.");
+  if ((fixed.width_cm > 0 && width !== fixed.width_cm) || (!usesWidthOnlyMeasurements(product) && fixed.height_cm > 0 && height !== fixed.height_cm)) throw new Error("Seçilen ürün sabit ölçülüdür; farklı ölçü için uygun ürünü seçin.");
   const limits = product.technical_limits || {};
   for (const [value, axis, label] of [[width, "width", "En"], [height, "height", "Boy"]]) {
     if (value > 0 && ((limits[`min_${axis}_cm`] > 0 && value < limits[`min_${axis}_cm`]) || (limits[`max_${axis}_cm`] > 0 && value > limits[`max_${axis}_cm`]))) throw new Error(`${label}, seçilen sistemin ölçü sınırının dışında. Uygun sistem seçin.`);
@@ -245,7 +256,7 @@ export function calculateCurtainLine(product, form) {
   if (caseMode === "ortak" && !hasMechanicalPanels) throw new Error("Ortak kasa için en az bir parça ekleyin.");
   const count = positive(form.count, hasMechanicalPanels ? "Kasa düzeni sayısı" : mode === "textile" ? "Parça sayısı" : "Adet / takım sayısı", true);
   let width = hasMechanicalPanels ? 0 : type === "adet" ? nonnegative(form.width, "En") : positive(form.width, "En");
-  let height = isRusticProduct(product) ? 0 : hasMechanicalPanels ? 0 : mode === "textile" || mode === "fon" || type === "m2" ? positive(form.height, "Boy") : nonnegative(form.height, "Boy");
+  let height = usesWidthOnlyMeasurements(product) ? 0 : hasMechanicalPanels ? 0 : mode === "textile" || mode === "fon" || type === "m2" ? positive(form.height, "Boy") : nonnegative(form.height, "Boy");
   if (!hasMechanicalPanels) validateProductDimensions(rusticSizes ? { ...product, fixed_dimensions: null } : product, width, height);
   const chainDirection = requiresDirection && !hasMechanicalPanels ? form.chain_direction : "";
   if (requiresDirection && !hasMechanicalPanels && !["Sağ", "Sol"].includes(chainDirection)) throw new Error("Zincir / ip yönünü seçin.");
@@ -443,6 +454,7 @@ export function salePayload(cart, header, percent, status, existingIdempotencyKe
     sale_items: cart.map((line) => ({ product: line.product_id, quantity: line.quantity, width: line.width, height: line.height, unit_price: line.unit_price, total_price: line.item_total, room_name: [line.room_name, line.area].filter(Boolean).join(" / "), facade: line.facade, window_name: line.window_name, item_note: [line.variant ? `Renk / VR: ${line.variant}` : "", line.chain_direction ? `${line.motor_system?.role === "curtain" ? "Motor yönü" : "Zincir / ip yönü"}: ${line.chain_direction}` : "", panelNote(line), accessoryNote(line), line.pleat_name, line.item_note].filter(Boolean).join(" · ") })),
     sub_total: totals.subtotal, discount_amount: totals.discountAmount, discount_percent: totals.discountPercent, credit_card_fee: fee, grand_total: totals.total,
     payment_method: header.payment_method, status,
+    measurement_source: header.measurement_source || "unspecified",
     ...(["preliminary", "confirmed"].includes(header.measurement_status || "preliminary") ? { measurement_status: header.measurement_status || "preliminary" } : {}),
     customer_name: `${header.first_name || ""} ${header.last_name || ""}`.trim(), customer_phone: header.customer_phone || "", customer_address: header.customer_address || "", delivery_date: header.delivery_date || null, sale_note: header.sale_note || "", delivery_method: header.delivery_method,
     client_request_id: existingIdempotencyKey,
@@ -460,5 +472,5 @@ export function restoreSaleDraft(sale) {
   const legacyAmount = !saved && (sale.discount_amount || 0) > 0 && (sale.discount_percent || 0) === 0;
   const discount = saved?.discount_percent ?? (legacyAmount ? (sale.sub_total ? roundMoney(sale.discount_amount / sale.sub_total * 100) : 0) : sale.discount_percent ?? (sale.sub_total ? roundMoney((sale.discount_amount || 0) / sale.sub_total * 100) : 0));
   const deliveryMethod = saved?.delivery_method || sale.delivery_method || header.delivery_method || "magaza";
-  return { cart, discount, header: { first_name: header.first_name ?? words.shift() ?? "", last_name: header.last_name ?? words.join(" "), customer_phone: sale.customer_phone || "", customer_address: sale.customer_address || "", delivery_date: sale.delivery_date ? String(sale.delivery_date).slice(0, 10) : "", sale_note: sale.sale_note || "", payment_method: sale.payment_method || "Nakit", ...header, measurement_status: sale.measurement_status || header.measurement_status || "preliminary", delivery_method: deliveryMethod === "installation" ? "montaj" : deliveryMethod === "store" ? "magaza" : deliveryMethod } };
+  return { cart, discount, header: { first_name: header.first_name ?? words.shift() ?? "", last_name: header.last_name ?? words.join(" "), customer_phone: sale.customer_phone || "", customer_address: sale.customer_address || "", delivery_date: sale.delivery_date ? String(sale.delivery_date).slice(0, 10) : "", sale_note: sale.sale_note || "", payment_method: sale.payment_method || "Nakit", ...header, measurement_status: sale.measurement_status || header.measurement_status || "preliminary", measurement_source: sale.measurement_source || "unspecified", delivery_method: deliveryMethod === "installation" ? "montaj" : deliveryMethod === "store" ? "magaza" : deliveryMethod } };
 }
