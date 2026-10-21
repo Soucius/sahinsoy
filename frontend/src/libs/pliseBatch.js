@@ -1,8 +1,8 @@
-import { calculateCurtainLine, normalizeName, roundMoney, roundQuantity } from "./curtainCalculation.js";
+import { calculateCurtainLine, normalizeName, roundMoney, roundQuantity, usesWidthOnlyMeasurements } from "./curtainCalculation.js";
 
 export function supportsMeasurementBatch(product) {
   const category = normalizeName(product?.product_category?.category_name || product?.category_name);
-  return product?.calculation_type === "m2" && /plise|honeycomb/.test(category);
+  return product?.calculation_type === "m2" && /plise|honeycomb/.test(category) || usesWidthOnlyMeasurements(product);
 }
 
 export function createMeasurementRow(values = {}) {
@@ -35,7 +35,7 @@ export function calculateMeasurementBatch(product, common, rows) {
   const lines = rows.map((row, index) => {
     try {
       if (!row || typeof row !== "object") throw new Error("Ölçüleri girin.");
-      const label = String(row.label || "").trim() || `Cam ${index + 1}`;
+      const label = String(row.label || "").trim() || `${usesWidthOnlyMeasurements(product) ? "Ölçü" : "Cam"} ${index + 1}`;
       const variant = String(row.variant || "").trim() || String(common.variant || "").trim();
       const area = [String(common.area || "").trim(), label].filter(Boolean).join(" / ");
       if (area.length > 200 || variant.length > 150) throw new Error("Cam adı veya renk / VR bilgisi çok uzun.");
@@ -49,5 +49,5 @@ export function calculateMeasurementBatch(product, common, rows) {
   const total = roundMoney(lines.reduce((sum, line) => sum + line.item_total, 0));
   const pieces = lines.reduce((sum, line) => sum + line.pieces, 0);
   if (![quantity, total, pieces].every(Number.isFinite)) throw new Error("Ölçü listesi toplamı hesaplama sınırını aşıyor.");
-  return { lines, quantity, total, pieces };
+  return { lines, quantity, total, pieces, unit_label: lines[0].unit_label };
 }
