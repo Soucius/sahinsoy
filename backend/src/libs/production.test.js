@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import { ENV } from './env.js';
 import User from '../models/User.js';
@@ -205,4 +206,29 @@ test('public signup cannot bypass staff isolation by creating a POS account', as
     userRoutes.handle({ method: 'POST', url: '/', headers: {}, body: { user_username: 'unapproved-account' } }, res, reject);
   });
   assert.equal(res.statusCode, 401);
+});
+
+test('staff passwords accept six characters and reject five on creation and reset, storing only hashes', async t => {
+  let created, updated;
+  t.mock.method(ProductionStaff, 'create', async data => { created = data; return { ...data, _id: ids.nevzat }; });
+  t.mock.method(ProductionStaff, 'findOneAndUpdate', async (_filter, change) => { updated = change; return { ...change.$set, _id: ids.nevzat }; });
+  for (const password of ['abcde', 'abcdef']) {
+    const creating = response();
+    await createStaff({ productionActor: admin, body: { name: 'TEST Staff', username: 'test.staff', duties: ['cutting'], password } }, creating);
+    const resetting = response();
+    await updateStaff({ productionActor: admin, params: { id: ids.nevzat }, body: { expected_version: 0, password } }, resetting);
+    if (password.length === 5) {
+      assert.equal(creating.statusCode, 400); assert.equal(resetting.statusCode, 400);
+      assert.equal(created, undefined); assert.equal(updated, undefined);
+    } else {
+      assert.equal(creating.statusCode, 201); assert.equal(resetting.statusCode, 200);
+      for (const data of [created, updated.$set]) {
+        assert.equal(data.password, undefined);
+        assert.notEqual(data.password_hash, password);
+        assert.equal(await bcrypt.compare(password, data.password_hash), true);
+      }
+      assert.equal(JSON.stringify(creating.body).includes('password'), false);
+      assert.equal(JSON.stringify(resetting.body).includes('password'), false);
+    }
+  }
 });
