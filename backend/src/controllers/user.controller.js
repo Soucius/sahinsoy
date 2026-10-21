@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import { ENV } from "../libs/env.js";
 import Role from "../models/Role.js";
 import { sendEmail } from "../libs/mailer.js"; 
+import { isProductionAdmin } from "../libs/productionAccess.js";
 
 const generateToken = (id) => {
     return jwt.sign({ id }, ENV.JWT_SECRET, {
@@ -25,6 +26,7 @@ export async function getAllUsers(_, res) {
 
 export async function getUserById(req, res) {
     try {
+        if (String(req.user._id) !== req.params.id && !isProductionAdmin(req.user)) return res.status(403).json({ message: "Başka bir kullanıcının hesabına erişemezsiniz." });
         const user = await User.findById(req.params.id).populate("user_role", "role_name").select("-user_password");
 
         if (!user) {
@@ -53,7 +55,7 @@ export async function createUser(req, res) {
         const savedUser = await newUser.save();
         const token = generateToken(savedUser._id);
 
-        res.status(201).json({ token, user: savedUser });
+        res.status(201).json({ token, user: { _id: savedUser._id, user_username: savedUser.user_username, user_email: savedUser.user_email } });
     } catch (error) {
         console.error("Error creating user: ", error);
 
@@ -68,7 +70,10 @@ export async function createUser(req, res) {
 export async function updateUser(req, res) {
     try {
         const userId = req.params.id;
-        const updateData = req.body;
+        if (String(req.user._id) !== userId && !isProductionAdmin(req.user)) return res.status(403).json({ message: "Başka bir kullanıcının hesabını değiştiremezsiniz." });
+        const allowed = ["user_username", "user_email", "user_phone", "user_password"];
+        if (!req.body || Object.keys(req.body).some(key => !allowed.includes(key))) return res.status(400).json({ message: "Bu ekranda yalnız hesap iletişim bilgileri ve parola değiştirilebilir." });
+        const updateData = Object.fromEntries(allowed.filter(key => req.body[key] !== undefined).map(key => [key, req.body[key]]));
 
         if (updateData.user_password && updateData.user_password !== "") {
             const salt = await bcrypt.genSalt(10);
