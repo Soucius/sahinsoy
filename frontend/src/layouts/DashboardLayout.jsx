@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import api from "../libs/axios";
+import { isProductionAdmin } from "../../../backend/src/libs/productionAccess.js";
 
 const DashboardLayout = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -67,6 +68,7 @@ const DashboardLayout = () => {
     restrictedPaths.some((p) => location.pathname.startsWith(p));
 
   const menuItems = [
+    { title: "Üretim ve Tedarik", path: "/dashboard/production", icon: <Layers size={20} />, allowed: isProductionAdmin(currentUser) },
     {
       title: "Genel Bakış",
       path: "/dashboard",
