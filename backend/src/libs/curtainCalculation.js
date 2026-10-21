@@ -96,7 +96,8 @@ export function usesWidthOnlyMeasurements(product) {
   const normalized = { ...product, calculation_type: type };
   if (supportsFoldingPanels(normalized) || isObaFoldingProduct(normalized)) return false;
   const category = normalizeName(product?.product_category?.category_name || product?.category_name);
-  return isRusticProduct(product) || type === "mt" && ["dekoratif ray", "ray", "ray sistemleri", "alinlik"].includes(category);
+  const adaRail = category === "ada" && /\bray(?:i)?\b/.test(normalizeName(product?.product_name));
+  return isRusticProduct(product) || type === "mt" && (["dekoratif ray", "ray", "ray sistemleri", "alinlik"].includes(category) || adaRail);
 }
 
 export const measurementSourceLabel = (source) => ({ customer: "Müşteri ölçüsü", team: "Ekibimiz ölçtü" })[source] || "Ölçüyü alan: Belirtilmedi";
