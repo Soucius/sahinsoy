@@ -21,6 +21,6 @@ const schema = new mongoose.Schema({
   revision: { type: Number, default: 0, min: 0 },
   jobs: { type: [job], default: [] },
   history: { type: [event], default: [] },
-  whatsapp_consent: { granted_at: Date, granted_by: String },
+  whatsapp_consent: { granted_at: Date, granted_by: String, phone: String },
 }, { timestamps: true });
 export default mongoose.model('ProductionOrder', schema);
