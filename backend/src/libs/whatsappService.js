@@ -1,6 +1,9 @@
 import Notification from '../models/WhatsAppNotification.js';
 import ProductionOrder from '../models/ProductionOrder.js';
 import Sale from '../models/Sale.js';
+import { sendGupshupNotification } from './gupshupTransport.js';
+import Receipt from '../models/WhatsAppDeliveryReceipt.js';
+import { applyGupshupReceipts } from './gupshupWebhook.js';
 import { fingerprint } from './productionWorkflow.js';
 import { allProductsReady, connectionSignature, messagePayload, providerError, readyKind, whatsappConfig, whatsappPhone } from './whatsappNotifications.js';
 
@@ -28,6 +31,7 @@ async function validSource(n, config) {
 }
 export async function sendClaimedNotification(n, config, send = fetch) {
   const payload = messagePayload(n, config);
+  if (config.provider === 'gupshup') return sendGupshupNotification(payload, config, send);
   let response, data;
   try {
     response = await send(`https://graph.facebook.com/${config.version}/${config.phoneId}/messages`, { method: 'POST', headers: { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(15000) });
@@ -56,11 +60,12 @@ export async function drainWhatsAppQueue() {
       } catch { result = { status: 'unknown', detail: 'Gönderim kontrolü tamamlanamadı; tekrar gönderilmedi.' }; }
       // A signed delivery webhook may arrive before the HTTP response.
       await Notification.updateOne({ _id: n._id, status: 'sending' }, { $set: result });
+      if (config.provider === 'gupshup' && result.provider_id) await applyGupshupReceipts(result.provider_id, config);
     }
   } finally { running = false; }
 }
 export function kickWhatsAppQueue() { void drainWhatsAppQueue().catch(() => { console.error('WhatsApp gönderim kuyruğu kontrol edilemedi.'); }); }
-export async function startWhatsAppWorker() { await Notification.init(); kickWhatsAppQueue(); const timer = setInterval(kickWhatsAppQueue, 20000); timer.unref(); return timer; }
+export async function startWhatsAppWorker() { await Notification.init(); await Receipt.init(); kickWhatsAppQueue(); const timer = setInterval(kickWhatsAppQueue, 20000); timer.unref(); return timer; }
 export async function retryNotification(id) {
   const config = whatsappConfig();
   const n = await Notification.findById(id).lean();
