@@ -1,6 +1,6 @@
 import express from 'express';
 import { productionAuth, productionAdminOnly } from '../middlewares/production.middleware.js';
-import { staffLogin, productionMe, getStaff, createStaff, updateStaff, getCandidates, getProductionOrders, createProductionOrder, refreshProductionOrder, updateProductionJob } from '../controllers/production.controller.js';
+import { staffLogin, productionMe, getStaff, createStaff, updateStaff, getCandidates, getProductionOrders, createProductionOrder, refreshProductionOrder, updateProductionJob, updateWhatsAppConsent } from '../controllers/production.controller.js';
 const router = express.Router();
 router.post('/staff/login', staffLogin);
 router.use(productionAuth);
@@ -12,5 +12,6 @@ router.get('/candidates', productionAdminOnly, getCandidates);
 router.get('/orders', getProductionOrders);
 router.post('/orders', productionAdminOnly, createProductionOrder);
 router.post('/orders/:id/refresh', productionAdminOnly, refreshProductionOrder);
+router.patch('/orders/:id/whatsapp-consent', productionAdminOnly, updateWhatsAppConsent);
 router.patch('/orders/:id/jobs/:lineId', updateProductionJob);
 export default router;
