@@ -1,4 +1,5 @@
 import Notification from '../models/WhatsAppNotification.js';
+import { receiveGupshupWebhook } from '../libs/gupshupWebhook.js';
 import { connectionSignature, providerError, publicConnection, publicNotification, validVerifyToken, validWebhookSignature, whatsappConfig, whatsappPhone } from '../libs/whatsappNotifications.js';
 import { kickWhatsAppQueue, retryNotification } from '../libs/whatsappService.js';
 const fail = res => res.status(500).json({ message: 'WhatsApp bilgileri alınamadı. Tekrar deneyin.' });
@@ -11,7 +12,7 @@ export async function getWhatsAppStatus(_req, res) {
 export async function testWhatsApp(req, res) {
   try {
     const config = whatsappConfig();
-    if (!config.enabled || config.mode !== 'test') return res.status(409).json({ message: 'Önce sunucuda Meta deneme bağlantısını tamamlayın.' });
+    if (!config.enabled || config.mode !== 'test') return res.status(409).json({ message: 'Önce sunucuda deneme bağlantısını tamamlayın.' });
     if (!req.body || Object.keys(req.body).length !== 1 || !/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(req.body.request_id || '')) return res.status(400).json({ message: 'Deneme isteği geçersiz. Ekranı yenileyin.' });
     const n = await Notification.findOneAndUpdate({ event_key: `test:${req.body.request_id}` }, { $setOnInsert: { kind: 'connection_test', mode: 'test', recipient: config.testRecipient, config_signature: connectionSignature(config), status: 'queued' } }, { upsert: true, new: true, runValidators: true }).lean();
     kickWhatsAppQueue();
@@ -33,6 +34,7 @@ export function verifyWhatsAppWebhook(req, res) {
 }
 export async function receiveWhatsAppWebhook(req, res) {
   const config = whatsappConfig();
+  if (config.provider === 'gupshup') return receiveGupshupWebhook(req, res, config);
   if (!validWebhookSignature(req.body, req.get('x-hub-signature-256'), config.appSecret)) return res.sendStatus(401);
   let payload;
   try { payload = JSON.parse(req.body.toString('utf8')); } catch { return res.sendStatus(400); }
