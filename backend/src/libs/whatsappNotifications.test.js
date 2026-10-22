@@ -82,7 +82,8 @@ test('live notification is withheld without recorded customer permission', async
   const writes = [];
   t.mock.method(Notification, 'updateOne', async (...args) => writes.push(args));
   await enqueueReadyNotification(before, after, s, {}, live); assert.equal(writes.length, 0);
-  await enqueueReadyNotification(before, { ...after, whatsapp_consent: { granted_at: new Date() } }, s, {}, live); assert.equal(writes.length, 1);
+  await enqueueReadyNotification(before, { ...after, whatsapp_consent: { granted_at: new Date(), phone: whatsappPhone(s.customer_phone) } }, s, {}, live); assert.equal(writes.length, 1);
+  await enqueueReadyNotification(before, { ...after, whatsapp_consent: { granted_at: new Date(), phone: '905550000002' } }, s, {}, live); assert.equal(writes.length, 1, 'changing the customer phone cannot carry over another number’s consent');
 });
 test('HTTP acceptance is not delivery; timeouts and server errors are not automatically retried', async () => {
   let calls = 0;
