@@ -36,10 +36,10 @@ export default function WhatsAppTestPage() {
     {error && <p role="alert" className="border border-red-300 bg-red-50 rounded-xl p-4">{error}</p>}
     {notice && <p role="status" className="border border-[#b38b62] bg-[#f4ecdf] rounded-xl p-4">{notice}</p>}
     {connection && <section className="rounded-2xl border border-[#d8c5ae] bg-[#f4ecdf] p-5 space-y-3">
-      <h2 className="text-xl font-bold">{connection.mode === 'test' ? 'Meta deneme bağlantısı' : connection.mode === 'live' ? 'Mağaza hattı bağlantısı' : 'Bağlantı kurulumu bekleniyor'}</h2>
+      <h2 className="text-xl font-bold">{connection.mode === 'test' ? connection.provider === 'gupshup' ? 'Mağaza hattı · Kontrollü deneme' : 'Meta deneme bağlantısı' : connection.mode === 'live' ? 'Mağaza hattı bağlantısı' : 'Bağlantı kurulumu bekleniyor'}</h2>
       <p className="font-semibold">{connection.configured ? 'Gönderim bağlantısı hazır' : 'Otomatik mesaj gönderimi kapalı'}</p>
       {connection.missing.length > 0 && <p>Eksik bağlantı bilgileri: {connection.missing.join(', ')}.</p>}
-      {connection.mode === 'test' ? <><p>Deneme alıcısı: <strong>{connection.recipient || 'Tanımlanmadı'}</strong>. Bütün ürünler hazır işaretlendiğinde yalnız bu numaraya Meta’nın standart İngilizce <strong>Hello World</strong> deneme mesajı gönderilir. Müşterilere mesaj gitmez; müşteri adı ve sipariş bilgileri Meta’ya aktarılmaz.</p><p>Bu adım bağlantıyı sınar. Kişiye özel Türkçe mesaj, mağaza hattı ve mesaj şablonu onayından sonra kullanılacak.</p>
+      {connection.mode === 'test' ? <><p>Deneme alıcısı: <strong>{connection.recipient || 'Tanımlanmadı'}</strong>. {connection.provider === 'gupshup' ? 'Mağaza hattından yalnız bu numaraya, “Deneme Müşterisi” adı ve “TEST” sipariş numarasıyla Türkçe mesaj gönderilir. Gerçek müşterilere mesaj gitmez; gerçek müşteri bilgileri paylaşılmaz.' : <>Bütün ürünler hazır işaretlendiğinde yalnız bu numaraya Meta’nın standart İngilizce <strong>Hello World</strong> deneme mesajı gönderilir. Müşterilere mesaj gitmez; müşteri adı ve sipariş bilgileri Meta’ya aktarılmaz.</>}</p><p>Bu adım bağlantıyı sınar. Müşterilere otomatik bildirim, mağaza yöneticisi canlı gönderimi açtıktan sonra kullanılacak.</p>
         <button className={`${button} bg-[#754b2e] text-white`} disabled={busy || tested || !connection.configured} onClick={() => { requestId.current ||= crypto.randomUUID(); send(async () => { await api.post('/whatsapp/test', { request_id: requestId.current }); setTested(true); }, 'Deneme isteği sıraya alındı. Sonucu aşağıdaki listeden takip et.'); }}>{busy ? 'İşleniyor…' : tested ? 'Deneme isteği oluşturuldu' : 'Kendi numarama deneme mesajı gönder'}</button></>
       : connection.mode === 'live' ? <p>Müşteri bildirim izni kayıtlı siparişlerin bütün ürünleri hazır olduğunda teslim şekline uygun onaylı mesaj gönderilir.</p>
       : <p>Meta erişim anahtarı ve doğrulanmış deneme numarası sunucuya tanımlandıktan sonra burada kendi numarana gönderim deneyebilirsin.</p>}
@@ -48,7 +48,7 @@ export default function WhatsAppTestPage() {
     </section>}
     <section className="rounded-2xl border border-[#d8c5ae] bg-[#fffcf6] p-5 space-y-3">
       <h2 className="text-xl font-bold">Mağaza hattında kullanılacak mesaj</h2>
-      <p>Sayın [müşteri adı], ürünleriniz hazırdır. Mağazamızdan teslim alabilirsiniz. Bizi tercih ettiğiniz için teşekkür ederiz. Şahinsoy Perde · Sipariş no: [sipariş no]</p>
+      <p>Sayın [müşteri adı], [sipariş no] numaralı siparişinizin ürünleri hazırdır. Ürünlerinizi mağazamızdan teslim alabilirsiniz. Şahinsoy Perde</p>
       <p className="text-sm text-[#78634f]">Montajlı işlerde teslim alma cümlesi yerine montaj randevusu için iletişime geçileceği belirtilir. Bu metin önizlemedir.</p>
     </section>
     <section className="space-y-3"><h2 className="text-2xl font-bold">Son bildirimler</h2>
