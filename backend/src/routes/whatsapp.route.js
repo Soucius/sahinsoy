@@ -1,0 +1,12 @@
+import express from 'express';
+import { productionAuth, productionAdminOnly } from '../middlewares/production.middleware.js';
+import { getWhatsAppStatus, testWhatsApp, retryWhatsApp, verifyWhatsAppWebhook, receiveWhatsAppWebhook } from '../controllers/whatsapp.controller.js';
+export const whatsappWebhookRouter = express.Router();
+whatsappWebhookRouter.get('/', verifyWhatsAppWebhook);
+whatsappWebhookRouter.post('/', express.raw({ type: 'application/json', limit: '256kb' }), receiveWhatsAppWebhook);
+const router = express.Router();
+router.use(productionAuth, productionAdminOnly);
+router.get('/', getWhatsAppStatus);
+router.post('/test', testWhatsApp);
+router.post('/notifications/:id/retry', retryWhatsApp);
+export default router;
