@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readyMessage } from './whatsappNotifications.js';
 export const SUPPLY = { awaiting_order: 'Ürün siparişi verilecek', ordered: 'Ürün siparişi verildi', in_transit: 'Kargoda', received: 'Ürün mağazaya geldi' };
 export const STAGES = { waiting: 'Üretim bekliyor', cutting: 'Kesimde', cut: 'Kesildi', sewing: 'Dikim sırasında', sewn: 'Dikildi', ready: 'Teslime / montaja hazır', installation: 'Montajda', installed: 'Montaj tamamlandı' };
 export class ProductionError extends Error { constructor(message, status = 400) { super(message); this.status = status; } }
@@ -106,6 +107,6 @@ export function applyJobChange(job, input, actor, sale) {
 export function notificationDraft(sale, record) {
   const allReady = record.jobs.length > 0 && record.jobs.every(j => ['ready', 'installation', 'installed'].includes(j.stage));
   const allInstalled = record.jobs.length > 0 && record.jobs.every(j => j.stage === 'installed');
-  const status = allInstalled ? 'montajı tamamlandı' : allReady ? 'hazırlandı' : 'hazırlık süreci devam ediyor';
-  return `Merhaba ${text(sale.customer_name, 120)}, Şahinsoy Perde siparişiniz${allReady && !allInstalled ? ' ' : 'in '}${status}.${allReady && !allInstalled ? (['montaj','installation'].includes(sale.delivery_method) ? ' Montaj randevusu için sizinle iletişime geçeceğiz.' : ' Mağazadan teslim almak için bizimle iletişime geçebilirsiniz.') : ''} Sipariş no: ${String(sale._id).slice(-8).toUpperCase()}`;
+  if (allReady && !allInstalled) return readyMessage(sale);
+  return `Sayın ${text(sale.customer_name || 'Müşterimiz', 120)}, Şahinsoy Perde siparişinizin ${allInstalled ? 'montajı tamamlandı' : 'hazırlık süreci devam ediyor'}. Sipariş no: ${String(sale._id).slice(-8).toUpperCase()}`;
 }
