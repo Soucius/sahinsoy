@@ -6,7 +6,7 @@ import { allProductsReady, connectionSignature, messagePayload, providerError, r
 
 export async function enqueueReadyNotification(before, after, sale, session, config = whatsappConfig()) {
   if (!config.enabled || allProductsReady(before) || !allProductsReady(after) || sale.status !== 'tamamlandi' || sale.measurement_status !== 'confirmed' || after.source_fingerprint !== fingerprint(sale) || !readyKind(sale)) return;
-  if (config.mode === 'live' && !after.whatsapp_consent?.granted_at) return;
+  if (config.mode === 'live' && (!after.whatsapp_consent?.granted_at || after.whatsapp_consent.phone !== whatsappPhone(sale.customer_phone))) return;
   const recipient = config.mode === 'test' ? config.testRecipient : whatsappPhone(sale.customer_phone);
   if (!recipient) return;
   await Notification.updateOne({ event_key: `ready:${sale._id}:${config.mode}` }, { $setOnInsert: {
@@ -24,7 +24,7 @@ async function validSource(n, config) {
     ProductionOrder.findById(n.production_order).lean(),
     Sale.findById(n.sale).populate({ path: 'sale_items.product', select: 'product_name product_category product_brand', populate: [{ path: 'product_category', select: 'category_name' }, { path: 'product_brand', select: 'brand_name' }] }).select('sale_items pos_details customer_name customer_phone delivery_method status measurement_status measurement_revision').lean(),
   ]);
-  return Boolean(sale && record && sale.status === 'tamamlandi' && sale.measurement_status === 'confirmed' && allProductsReady(record) && record.source_fingerprint === n.source_fingerprint && fingerprint(sale) === n.source_fingerprint && (config.mode === 'test' || (record.whatsapp_consent?.granted_at && whatsappPhone(sale.customer_phone) === n.recipient && String(sale.customer_name || 'Müşterimiz').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 120) === n.customer_name)));
+  return Boolean(sale && record && sale.status === 'tamamlandi' && sale.measurement_status === 'confirmed' && allProductsReady(record) && record.source_fingerprint === n.source_fingerprint && fingerprint(sale) === n.source_fingerprint && (config.mode === 'test' || (record.whatsapp_consent?.granted_at && record.whatsapp_consent.phone === n.recipient && whatsappPhone(sale.customer_phone) === n.recipient && String(sale.customer_name || 'Müşterimiz').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 120) === n.customer_name)));
 }
 export async function sendClaimedNotification(n, config, send = fetch) {
   const payload = messagePayload(n, config);
