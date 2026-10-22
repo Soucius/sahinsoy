@@ -1,7 +1,7 @@
 import { paymentSummary } from "../../../backend/src/libs/orderPayments.js";
 import { discountLabel } from "./agreedPrice.js";
 import { discountedCart } from "./discountPresentation.js";
-import { formatMoney, formatNumber, usesWidthOnlyMeasurements, measurementSourceLabel, mechanicalPanelPosition, needsControlDirection, orderTotals, paymentConversion, productMode, restoreSaleDraft, showFabricSpecs } from "./curtainCalculation.js";
+import { formatMoney, formatNumber, normalizeName, usesWidthOnlyMeasurements, measurementSourceLabel, mechanicalPanelPosition, needsControlDirection, orderTotals, paymentConversion, productMode, restoreSaleDraft, showFabricSpecs } from "./curtainCalculation.js";
 
 export function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
@@ -151,16 +151,68 @@ function controlDirection(line) {
   return line.chain_direction && !mechanicalParts(line) ? `<div class="detail">${line.motor_system?.role === "curtain" ? "Motor yönü" : "Zincir / ip yönü"}: ${safe(line.chain_direction)}</div>` : "";
 }
 
+const sumPrintMoney = (values) => values.reduce((sum, value) => sum + Math.round(Number(value || 0) * 100), 0) / 100;
+const printOptionKey = (option) => [option.name, option.color || "", option.unit, option.unit_price, option.pricing_basis, option.pricing_scope, option.count_per_piece, percentageOption(option) ? option.quantity : null];
+
+// Presentation only. Keep the stored glass measurements and each piece's minimum
+// billable area intact; add recorded quantities/amounts instead of recalculating.
+export function customerPrintEntries(cart) {
+  const entries = [], groups = new Map();
+  cart.forEach((line, index) => {
+    const eligible = line.calc_type === "m2" && /plise|plisel|honeycomb/.test(normalizeName(`${line.category_name || ""} ${line.product_name || ""}`)) && !line.motor_system && !mechanicalParts(line) && Number.isFinite(line.quantity) && line.quantity > 0;
+    const key = eligible ? JSON.stringify([
+      line.product_id, line.product_name, line.brand_name, line.variant || "", line.unit_label,
+      line.base_unit_price, line.labor_unit_price || 0, line.labor_basis, line.case_color || "", line.chain_direction || "",
+      line.dual_plise?.role || "", line.dual_plise?.case_color || "", line.item_note || "",
+      line.discount_display?.percent, line.discount_display?.original_unit_price,
+      (line.accessories || []).map(printOptionKey),
+    ]) : null;
+    if (key && groups.has(key)) groups.get(key).members.push(line);
+    else {
+      const entry = { line, index, members: [line] };
+      entries.push(entry); if (key) groups.set(key, entry);
+    }
+  });
+  return entries.map(entry => {
+    if (entry.members.length === 1) return entry;
+    const members = entry.members;
+    const line = { ...entry.line,
+      quantity: Math.round(members.reduce((sum, item) => sum + item.quantity, 0) * 1e6) / 1e6,
+      pieces: members.reduce((sum, item) => sum + Number(item.pieces || item.count || 1), 0),
+      material_total: sumPrintMoney(members.map(item => item.material_total)),
+      labor_total: sumPrintMoney(members.map(item => item.labor_total)),
+      item_total: sumPrintMoney(members.map(item => item.item_total)),
+      accessories: (entry.line.accessories || []).map((option, index) => ({ ...option,
+        quantity: percentageOption(option) ? option.quantity : Math.round(members.reduce((sum, item) => sum + Number(item.accessories[index].quantity || 0), 0) * 1e6) / 1e6,
+        total: sumPrintMoney(members.map(item => item.accessories[index].total)),
+      })),
+    };
+    return { ...entry, line };
+  });
+}
+
+function compactPliseRow({ line, members }) {
+  const rooms = [...new Set(members.map(item => [item.room_name, item.facade].filter(Boolean).join(" · ")).filter(Boolean))];
+  const caseOption = option => /^kasa\s*\/\s*donanim\s*rengi\s*:/.test(normalizeName(option.name));
+  const caseColor = line.dual_plise?.case_color || line.case_color || line.accessories.find(caseOption)?.name.split(':').slice(1).join(':').trim();
+  const extras = line.accessories.filter(option => !caseOption(option) || Number(option.total) !== 0).map(option => `<div class="detail">${accessoryLabel(option)}: ${percentageOption(option) ? `%${rate(option.quantity)} → ${money(option.total)}` : `${number(option.quantity)} ${safe(option.unit)} × ${money(option.unit_price)} = ${money(option.total)}`}</div>`).join("");
+  return `<tr class="plise-summary"><td><strong>${safe(line.product_name)}</strong><div class="detail">${safe(line.brand_name)}${line.variant ? ` · Renk / VR: ${safe(line.variant)}` : ""}</div>${line.dual_plise ? `<div class="detail">Çiftli plise · ${safe(dualPliseRole(line.dual_plise))}${caseColor ? ` · Kasa rengi: ${safe(caseColor)}` : ""}</div>` : caseColor ? `<div class="detail">Kasa rengi: ${safe(caseColor)}</div>` : ""}${rooms.length ? `<div class="detail">${rooms.map(safe).join(" / ")}</div>` : ""}<div class="detail">Toplam ${number(line.pieces, 0)} adet · Ölçüler sipariş kaydındadır.</div>${line.item_note ? `<div class="detail">Not: ${safe(line.item_note)}</div>` : ""}${extras}</td><td class="right"><strong>${number(line.quantity)} ${safe(line.unit_label)}</strong><div class="detail">Toplam fiyatlandırılan alan</div></td><td class="right">${line.discount_display ? `<div class="detail">Liste fiyatı<br><del>${money(line.discount_display.original_unit_price)}</del> · ${safe(discountLabel(line.discount_display.percent))} iskonto</div><strong>${money(line.base_unit_price)} / ${safe(line.unit_label)}</strong>` : `${money(line.base_unit_price)} / ${safe(line.unit_label)}`}${line.labor_total ? `<div class="detail">${money(line.material_total)} ürün<br>${money(line.labor_total)} işçilik</div>` : ""}</td><td class="right"><strong>${money(line.item_total)}</strong></td></tr>`;
+}
+
 export function createCustomerOrderHtml(sale, logoUrl = "/sahinsoy-logo.svg") {
   const { cart, header, discount } = restoreSaleDraft(sale);
   const totals = orderTotals(cart, discount);
   const displayCart = discountedCart(cart, discount);
   const dualGroups = dualPliseGroups(displayCart);
   const motorGroups = motorSystemGroups(displayCart);
+  const printEntries = customerPrintEntries(displayCart);
+  const compactedDualIds = new Set(printEntries.filter(entry => entry.members.length > 1).flatMap(entry => entry.members.map(line => line.dual_plise?.group_id).filter(Boolean)));
   const conversion = paymentConversion(sale.grand_total ?? totals.total, header);
   const paymentDetail = conversion.currency === "TRY" ? "" : `<section class="meta"><h2>Döviz ödeme karşılığı</h2><p><strong>${safe(formatMoney(conversion.amount, conversion.currency))}</strong> · TL toplamı: ${money(conversion.total_tl)}</p><p>1 ${safe(conversion.currency)} = ${number(conversion.rate, 4)} TL · ${conversion.rate_source === "Harem" ? "Harem alış kuru" : "Elle girilen ödeme kuru"}</p>${conversion.rate_source === "Harem" ? `<p>Kur zamanı: ${safe(new Date(conversion.quoted_at).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" }))}</p>` : ""}<p class="detail">Döviz karşılığı, bu belgede belirtilen kurla hesaplanmıştır. Tahsilat makbuzu değildir.</p></section>`;
-  const rows = displayCart.map((line, lineIndex) => {
-    const dual = dualGroups.get(lineIndex);
+  const rows = printEntries.map(({ line, index: lineIndex, members }) => {
+    if (members.length > 1) return compactPliseRow({ line, members });
+    const originalDual = dualGroups.get(lineIndex);
+    const dual = originalDual && compactedDualIds.has(originalDual.group_id) ? { ...originalDual, last: false } : originalDual;
     const motor = motorGroups.get(lineIndex);
     const parts = mechanicalParts(line);
     const dimensions = motor?.role === "motor" || parts ? "" : line.panels?.length ? line.panels.map((panel) => `${safe(panel.label)}: ${number(panel.width)} × ${number(panel.height)} cm`).join(" · ") : (usesWidthOnlyMeasurements(line) && line.width ? `En ${number(line.width)} cm` : line.width || line.height ? `${number(line.width)} × ${number(line.height)} cm` : "");
