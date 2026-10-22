@@ -69,6 +69,7 @@ const DashboardLayout = () => {
 
   const menuItems = [
     { title: "Üretim ve Tedarik", path: "/dashboard/production", icon: <Layers size={20} />, allowed: isProductionAdmin(currentUser) },
+    { title: "WhatsApp Bildirimleri", path: "/dashboard/whatsapp", icon: <MonitorPlay size={20} />, allowed: isProductionAdmin(currentUser) },
     {
       title: "Genel Bakış",
       path: "/dashboard",
