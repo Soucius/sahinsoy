@@ -7,6 +7,7 @@ import ProductionOrder from '../models/ProductionOrder.js';
 import { ENV } from '../libs/env.js';
 import { STAFF_PRESETS, DUTIES, cleanStaffName, staffLoginKey, staffNamePattern } from '../libs/productionAccess.js';
 import { ProductionError, productionLines, fingerprint, visibleOrder, applyJobChange, stageChoices, notificationDraft } from '../libs/productionWorkflow.js';
+import { enqueueReadyNotification, kickWhatsAppQueue } from '../libs/whatsappService.js';
 const populate = query => query.populate({ path: 'sale_items.product', select: 'product_name product_category product_brand', populate: [{ path: 'product_category', select: 'category_name' }, { path: 'product_brand', select: 'brand_name' }] });
 const saleFields = 'sale_items pos_details customer_name customer_phone delivery_date delivery_method status measurement_revision measurement_status production_guard';
 const id = value => { if (typeof value !== 'string' || !/^[a-f\d]{24}$/i.test(value)) throw new ProductionError('Kayıt numarası geçersiz.'); return value; };
@@ -93,7 +94,7 @@ function present(record, sale, actor) {
   const result = visibleOrder(record, sale, actor);
   if (!result) return null;
   result.jobs = result.jobs.map(job => ({ ...job, next_stages: result.needs_refresh ? [] : stageChoices(job, actor, sale) }));
-  if (actor.kind === 'admin') { result.customer_phone = sale.customer_phone; result.message_draft = notificationDraft(sale, record); }
+  if (actor.kind === 'admin') { result.customer_phone = sale.customer_phone; result.message_draft = notificationDraft(sale, record); result.whatsapp_consent = Boolean(record.whatsapp_consent?.granted_at); }
   return result;
 }
 export async function getProductionOrders(req, res) {
@@ -156,6 +157,7 @@ export async function refreshProductionOrder(req, res) {
       });
       const updated = await ProductionOrder.findOneAndUpdate({ _id: record._id, revision: req.body.expected_revision }, { $set: { jobs, source_fingerprint: fingerprint(sale) }, $inc: { revision: 1 }, $push: { history: audit(req.productionActor, 'Güncel ölçü ve ürünler alındı; değişen satırlar üretim beklemeye döndü', '', { jobs: record.jobs }, { jobs }) } }, { new: true, session, runValidators: true }).lean();
       if (!updated) throw new ProductionError('Başka biri bu kaydı değiştirdi. Yenileyin.', 409);
+      await enqueueReadyNotification(record, updated, sale, session);
       return present(updated, sale, req.productionActor);
     });
     res.json(result);
@@ -179,6 +181,26 @@ export async function updateProductionJob(req, res) {
       const before = Object.fromEntries(Object.keys(patch).map(k => [k, job[k]]));
       const jobs = record.jobs.map(j => j.line_id === job.line_id ? { ...j, ...patch } : j);
       const updated = await ProductionOrder.findOneAndUpdate({ _id: record._id, revision: req.body.expected_revision }, { $set: { jobs }, $inc: { revision: 1 }, $push: { history: audit(req.productionActor, 'İş güncellendi', job.line_id, before, patch) } }, { new: true, session, runValidators: true }).lean();
+      if (!updated) throw new ProductionError('Başka biri bu kaydı değiştirdi. Yenileyin.', 409);
+      await enqueueReadyNotification(record, updated, sale, session);
+      return present(updated, sale, req.productionActor);
+    });
+    kickWhatsAppQueue();
+    res.json(result);
+  } catch (error) { fail(res, error); }
+}
+export async function updateWhatsAppConsent(req, res) {
+  try {
+    bodyKeys(req.body, ['expected_revision', 'granted']); revision(req.body);
+    if (typeof req.body.granted !== 'boolean') throw new ProductionError('Müşteri bildirim izni geçersiz.');
+    const result = await transaction(async session => {
+      const record = await ProductionOrder.findById(id(req.params.id)).session(session).lean();
+      if (!record) throw new ProductionError('Üretim kaydı bulunamadı.', 404);
+      const sale = await lockedSale(record.sale, session);
+      const updated = await ProductionOrder.findOneAndUpdate({ _id: record._id, revision: req.body.expected_revision }, {
+        $set: { whatsapp_consent: req.body.granted ? { granted_at: new Date(), granted_by: req.productionActor._id } : {} },
+        $inc: { revision: 1 }, $push: { history: audit(req.productionActor, req.body.granted ? 'Müşterinin WhatsApp sipariş bildirimi izni kaydedildi' : 'Müşterinin WhatsApp bildirim izni kaldırıldı') },
+      }, { new: true, session, runValidators: true }).lean();
       if (!updated) throw new ProductionError('Başka biri bu kaydı değiştirdi. Yenileyin.', 409);
       return present(updated, sale, req.productionActor);
     });
