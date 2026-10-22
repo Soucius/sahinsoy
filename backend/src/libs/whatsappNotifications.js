@@ -1,4 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { isGupshupId } from './gupshupTransport.js';
 
 export function whatsappPhone(value) {
   if (typeof value !== 'string' || !/^[+\d\s().-]+$/.test(value)) return '';
@@ -19,20 +20,33 @@ export function whatsappConfig(env = process.env) {
   const mode = ['test', 'live'].includes(env.WHATSAPP_MODE) ? env.WHATSAPP_MODE : 'disabled';
   const config = { mode, token: env.WHATSAPP_ACCESS_TOKEN || '', phoneId: env.WHATSAPP_PHONE_NUMBER_ID || '', version: env.WHATSAPP_GRAPH_VERSION || 'v25.0', testRecipient: whatsappPhone(env.WHATSAPP_TEST_RECIPIENT), storeTemplate: env.WHATSAPP_STORE_TEMPLATE || '', installationTemplate: env.WHATSAPP_INSTALLATION_TEMPLATE || '', language: env.WHATSAPP_TEMPLATE_LANGUAGE || 'tr', appSecret: env.WHATSAPP_APP_SECRET || '', verifyToken: env.WHATSAPP_VERIFY_TOKEN || '' };
   const missing = [];
-  if (!config.token) missing.push('Erişim anahtarı');
+  config.provider = env.WHATSAPP_PROVIDER || 'meta';
+  if (!['meta', 'gupshup'].includes(config.provider)) missing.push('Mesaj sağlayıcısı');
+  config.gupshupAppId = env.GUPSHUP_APP_ID || '';
+  config.gupshupSecret = env.GUPSHUP_CUSTOMER_SECRET || '';
+  config.gupshupSource = whatsappPhone(env.GUPSHUP_SOURCE_PHONE);
+  config.gupshupStoreTemplate = env.GUPSHUP_STORE_TEMPLATE_ID || '';
+  config.gupshupInstallationTemplate = env.GUPSHUP_INSTALLATION_TEMPLATE_ID || '';
+  config.gupshupWebhookToken = env.GUPSHUP_WEBHOOK_TOKEN || '';
+  if (config.provider === 'gupshup') {
+    if (!isGupshupId(config.gupshupAppId) || !config.gupshupSource) missing.push('Gupshup uygulama ve mağaza numarası');
+    if (config.gupshupSecret.length < 24) missing.push('Gupshup hesap anahtarı');
+    if (!isGupshupId(config.gupshupStoreTemplate) || (mode === 'live' && !isGupshupId(config.gupshupInstallationTemplate))) missing.push('Onaylı Gupshup mesaj şablonları');
+  } else if (!config.token) missing.push('Erişim anahtarı');
   if (!/^\d{5,30}$/.test(config.phoneId)) missing.push('Gönderici numara kimliği');
   if (!/^v\d{2}\.0$/.test(config.version)) missing.push('API sürümü');
   if (mode === 'test' && !config.testRecipient) missing.push('Doğrulanmış deneme alıcısı');
   if (mode === 'live') {
-    if (![config.storeTemplate, config.installationTemplate].every(t => /^[a-z][a-z0-9_]{0,511}$/.test(t))) missing.push('Onaylı teslim ve montaj mesaj şablonları');
+    if (config.provider !== 'gupshup' && ![config.storeTemplate, config.installationTemplate].every(t => /^[a-z][a-z0-9_]{0,511}$/.test(t))) missing.push('Onaylı teslim ve montaj mesaj şablonları');
     if (!/^[a-z]{2}(?:_[A-Z]{2})?$/.test(config.language)) missing.push('Şablon dili');
-    if (!config.appSecret || config.verifyToken.length < 24) missing.push('Teslim bildirimi doğrulaması');
+    if (config.provider === 'gupshup' ? config.gupshupWebhookToken.length < 24 : !config.appSecret || config.verifyToken.length < 24) missing.push('Teslim bildirimi doğrulaması');
   }
   config.missing = missing;
   config.enabled = mode !== 'disabled' && missing.length === 0;
   return config;
 }
 export function connectionSignature(config) {
+  if (config.provider === 'gupshup') return createHash('sha256').update(JSON.stringify([config.provider, config.mode, config.phoneId, config.gupshupAppId, config.gupshupSource, config.testRecipient, config.gupshupStoreTemplate, config.gupshupInstallationTemplate])).digest('hex');
   // Do not include the token: rotation must not create a new notification.
   return createHash('sha256').update(JSON.stringify([config.mode, config.phoneId, config.testRecipient, config.storeTemplate, config.installationTemplate, config.language, config.version])).digest('hex');
 }
@@ -40,6 +54,10 @@ export function messagePayload(notification, config) {
   if (!config.enabled || notification.config_signature !== connectionSignature(config)) throw new Error('Bağlantı ayarları değişti.');
   const to = config.mode === 'test' ? config.testRecipient : whatsappPhone(notification.recipient);
   if (!to || (config.mode === 'live' && notification.kind === 'connection_test')) throw new Error('Gönderim alıcısı geçersiz.');
+  if (config.provider === 'gupshup') return {
+    source: config.gupshupSource, destination: to,
+    template: { id: notification.kind === 'ready_installation' ? config.gupshupInstallationTemplate : config.gupshupStoreTemplate, params: config.mode === 'test' ? ['Deneme Müşterisi', 'TEST'] : [notification.customer_name, notification.order_code] },
+  };
   const template = config.mode === 'test' ? { name: 'hello_world', language: { code: 'en_US' } } : {
     name: notification.kind === 'ready_installation' ? config.installationTemplate : config.storeTemplate,
     language: { code: config.language },
@@ -47,7 +65,7 @@ export function messagePayload(notification, config) {
   };
   return { messaging_product: 'whatsapp', to, type: 'template', template, biz_opaque_callback_data: String(notification._id) };
 }
-export const publicConnection = config => ({ mode: config.mode, configured: config.enabled, missing: config.mode === 'disabled' ? [] : config.missing, recipient: config.mode === 'test' ? maskedPhone(config.testRecipient) : '', delivery_tracking: Boolean(config.appSecret && config.verifyToken.length >= 24) });
+export const publicConnection = config => ({ provider: config.provider || 'meta', mode: config.mode, configured: config.enabled, missing: config.mode === 'disabled' ? [] : config.missing, recipient: config.mode === 'test' ? maskedPhone(config.testRecipient) : '', delivery_tracking: config.provider === 'gupshup' ? config.gupshupWebhookToken.length >= 24 : Boolean(config.appSecret && config.verifyToken.length >= 24) });
 export function validWebhookSignature(rawBody, signature, secret) {
   if (!Buffer.isBuffer(rawBody) || !secret || !/^sha256=[a-f\d]{64}$/.test(signature || '')) return false;
   return timingSafeEqual(createHmac('sha256', secret).update(rawBody).digest(), Buffer.from(signature.slice(7), 'hex'));
