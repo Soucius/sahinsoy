@@ -168,7 +168,7 @@ test("free, paid and percentage case colors survive saving and measurement revis
   assert.doesNotThrow(() => normalizeSale({ ...saved, ...revised }));
 });
 
-test("customer and manufacturing output keep each case color beside its own row without color leakage", () => {
+test("customer output keeps each case color beside its own row without color leakage", () => {
   const rows = [
     row(100, 200, 1, { label: "Beyaz cam", variant: "VR101", case_color: whiteCase }),
     row(120, 210, 2, { label: "Antrasit cam", variant: "VR202", case_color: anthraciteCase }),
@@ -176,12 +176,10 @@ test("customer and manufacturing output keep each case color beside its own row 
   ];
   const saved = savedOrder(calculateMeasurementBatch(caseProduct, common(caseProduct, { extra_indices: [0, 1] }), rows).lines);
   const customer = createCustomerOrderHtml(saved);
-  const manufacturing = createManufacturingHtml(saved);
+  assert.throws(() => createManufacturingHtml(saved), /atölyede dikilecek ürün bulunmuyor/);
   const customerRows = customer.match(/<tr><td>[\s\S]*?<\/tr>/g) || [];
-  const manufacturingRows = manufacturing.match(/<section class="plan-box">[\s\S]*?<\/section>/g) || [];
   assert.equal(customerRows.length, 3);
-  assert.equal(manufacturingRows.length, 3);
-  for (const rendered of [customerRows, manufacturingRows]) {
+  for (const rendered of [customerRows]) {
     for (let index = 0; index < rows.length; index++) {
       assert.ok(rendered[index].includes(rows[index].label));
       assert.ok(rendered[index].includes(rows[index].variant));
@@ -192,9 +190,6 @@ test("customer and manufacturing output keep each case color beside its own row 
   assert.ok(customerRows[0].includes("Ölçü: 100,00 × 200,00 cm"));
   assert.ok(customerRows[1].includes("Ölçü: 120,00 × 210,00 cm"));
   assert.ok(customerRows[2].includes("Ölçü: 80,00 × 90,00 cm"));
-  assert.ok(manufacturingRows[1].includes("2 adet · En 120,00 cm"));
-  assert.ok(manufacturingRows[1].includes("Boy 210,00 cm"));
-  assert.ok(!manufacturing.includes("₺"));
 });
 
 test("30 mixed rows apply per-piece minimums and rounding, then add actual-width profiles", () => {
@@ -369,31 +364,23 @@ test("30 normal batch lines save, restore, and revise individually with original
   assert.doesNotThrow(() => normalizeSale({ ...saved, ...revised }));
 });
 
-test("customer and manufacturing output retain all 30 row labels, actual dimensions, counts, VR and accessories across pages", () => {
+test("customer output summarizes matching plise colors while retaining all 30 saved measurements", () => {
   const result = calculateMeasurementBatch(product, common(), thirtyRows());
   const saved = savedOrder(result.lines);
   const customer = createCustomerOrderHtml(saved);
-  const manufacturing = createManufacturingHtml(saved);
+  assert.throws(() => createManufacturingHtml(saved), /atölyede dikilecek ürün bulunmuyor/);
   const boxes = manufacturingBoxes(saved.pos_details.cart);
-  assert.equal(boxes.length, 30);
-  assert.equal((customer.match(/<tr><td>/g) || []).length, 30);
-  assert.equal((manufacturing.match(/class="sheet plan-sheet"/g) || []).length, 4);
-  assert.equal((manufacturing.match(/class="plan-box"/g) || []).length, 30);
-  for (let index = 0; index < 30; index++) {
-    assert.ok(customer.includes(`Doğu kanadı / Cam ${index + 1} ·`));
-    assert.ok(manufacturing.includes(`Doğu kanadı / Cam ${index + 1} ·`));
-    assert.equal(boxes[index].line.id, `batch-line-${index + 1}`);
-  }
+  assert.equal(boxes.length, 0);
+  const body = customer.match(/<tbody>([\s\S]*?)<\/tbody>/)[1];
+  assert.equal((body.match(/<tr/g) || []).length, 2);
+  assert.equal(saved.pos_details.cart.length, 30);
+  for (let index = 0; index < 30; index++) assert.equal(saved.pos_details.cart[index].area, `Doğu kanadı / Cam ${index + 1}`);
+  assert.ok(customer.includes('Toplam 39 adet'));
+  assert.ok(customer.includes('VR100 · Ekru'));
   assert.ok(customer.includes("Ölçü: 155,00 × 205,00 cm"));
   assert.ok(customer.includes("Hesap ölçüsü: 160,00 × 210,00 cm"));
   assert.ok(customer.includes("Profil: 1,55 m × ₺10,00 = ₺15,50"));
   assert.ok(customer.includes("VR999 · Antrasit"));
-  assert.ok(manufacturing.includes("VR999 · Antrasit"));
-  assert.ok(manufacturing.includes("2 adet · En 110,00 cm"));
-  assert.ok(manufacturing.includes("En 155,00 cm"));
-  assert.ok(manufacturing.includes("Boy 205,00 cm"));
-  assert.ok(manufacturing.includes("Profil"));
-  assert.ok(!manufacturing.includes("₺"));
 });
 
 test("batch output preserves the normal calculator result for a row with comma decimals and ignores stale case-builder state", () => {
@@ -405,4 +392,55 @@ test("batch output preserves the normal calculator result for a row with comma d
   assert.equal(result.pieces, 2);
   assert.equal(result.lines[0].accessories[0].quantity, 3.11);
   assert.equal(result.total, 703.1);
+});
+
+
+test('decorative rail rows bill each actual width independently and preserve individual VR through order and measurement revision',()=>{
+ const rail={...product,product_name:'Dekoratif Ray',category_name:'Dekoratif Ray',calculation_type:'mt',min_width_cm:100,dimension_rounding_cm:10,extra_options:[]};
+ const result=calculateMeasurementBatch(rail,{...defaultMeasurement(rail),room_name:'Salon'},[
+  row(79,'',1,{variant:'VR01 · Beyaz',label:'Kuzey'}),row(155,'',2,{variant:'VR02 · Ceviz',label:'Doğu'})]);
+ assert.equal(result.quantity,4.2);assert.equal(result.total,420);assert.equal(result.unit_label,'m');
+ assert.deepEqual(result.lines.map(l=>l.height),[0,0]);assert.deepEqual(result.lines.map(l=>l.variant),['VR01 · Beyaz','VR02 · Ceviz']);
+ const lines=result.lines.map((l,i)=>({...l,id:`rail-test-${i}`}));
+ const sale={...salePayload(lines,{...header,measurement_source:'team'},0,'tamamlandi','rail-test-key'),measurement_source:'team'};
+ const html=createCustomerOrderHtml(sale);assert.ok(html.includes('VR01 · Beyaz'));assert.ok(html.includes('VR02 · Ceviz'));assert.ok(html.includes('Ekibimiz ölçtü'));assert.ok(html.includes('En 79,00 cm'));assert.ok(!html.includes('× 0,00 cm'));
+ const revision=buildMeasurementRevision(sale,{measurements:lines.map((l,i)=>({...measurementFormForLine(l),width:i?185:80}))});
+ assert.deepEqual(revision.pos_details.cart.map(l=>l.variant),lines.map(l=>l.variant));assert.equal(revision.pos_details.cart[1].quantity,3.8);
+ assert.equal(manufacturingBoxes(lines).length,0);
+});
+test('rustic size ladder rows use next listed width with independent colors, counts and frozen prices',()=>{
+ const rustic={...product,product_name:'Cantara',category_name:'Rustik',calculation_type:'adet',supplier_unit:'Takım',extra_options:[],rustic_size_prices:[{width_cm:100,sale_price:1000},{width_cm:150,sale_price:1500},{width_cm:200,sale_price:2000}]};
+ const result=calculateMeasurementBatch(rustic,defaultMeasurement(rustic),[row(79,'',1,{variant:'Ekru'}),row(131,'',2,{variant:'Ceviz'})]);
+ assert.equal(result.total,4000);assert.equal(result.quantity,3);assert.equal(result.unit_label,'takım');assert.deepEqual(result.lines.map(l=>l.billable_width),[100,150]);
+ assert.deepEqual(result.lines.map(l=>l.height),[0,0]);assert.deepEqual(result.lines.map(l=>l.variant),['Ekru','Ceviz']);
+ assert.throws(()=>calculateMeasurementBatch(rustic,defaultMeasurement(rustic),[row(201,'')]),/en fazla/);
+ const folding={...rustic,calculation_type:'mt',category_name:'Ray',brand_name:'OBA Perdesan',product_name:'5+1 Katlama Mekanizması'};
+ assert.equal(supportsMeasurementBatch(folding),false);assert.equal(defaultMeasurement(folding).height,'260');
+});
+test('measurement provenance appears on both customer and textile workshop forms without leaking company or costs',()=>{
+ const fabric={...product,category_name:'Tül',calculation_type:'mt',extra_options:[]};
+ const line={...calculateCurtainLine(fabric,{...defaultMeasurement(fabric),width:400,height:260}),id:'source-paper'};
+ const sale={...salePayload([line],{...header,measurement_source:'customer'},0,'tamamlandi','source-paper-key'),measurement_source:'customer'};
+ assert.ok(createCustomerOrderHtml(sale).includes('Müşteri ölçüsü'));assert.ok(createManufacturingHtml(sale).includes('Müşteri ölçüsü'));
+ delete sale.measurement_source;assert.ok(createCustomerOrderHtml(sale).includes('Belirtilmedi'));
+});
+
+
+test('OBA ADA oval-square single, double and triple decorative rails support width-only rows and independent or duplicate VR entries',()=>{
+ for(const name of ['DEKORATİF OVAL-KARE TEKLİ RAY','DEKORATİF İKİLİ RAY','DEKORATİF ÜÇLÜ RAY','KULAKLI TEKLİ RAY','ÜÇLÜ OTEL RAYI']){
+  const p={...product,product_name:name,brand_name:'OBA Perdesan',category_name:'ADA',calculation_type:'mt',min_width_cm:0,dimension_rounding_cm:0,extra_options:[]};
+  assert.equal(supportsMeasurementBatch(p),true,name);assert.equal(defaultMeasurement(p).height,'');
+  const values=[row(155,'',1,{variant:'VR01 · Beyaz'}),row(240,'',1,{variant:'VR02 · Antrasit'}),row(155,'',2,{variant:'VR01 · Beyaz'})];
+  const result=calculateMeasurementBatch(p,defaultMeasurement(p),values);
+  assert.equal(result.quantity,7.05,name);assert.equal(result.total,705,name);assert.equal(result.pieces,4,name);
+  assert.deepEqual(result.lines.map(l=>l.height),[0,0,0]);assert.deepEqual(result.lines.map(l=>l.variant),values.map(r=>r.variant));
+  const lines=result.lines.map((l,i)=>({...l,id:`oba-ada-${i}`}));
+  const sale=salePayload(lines,header,0,'tamamlandi','oba-ada-test');
+  const html=createCustomerOrderHtml(sale);assert.ok(html.includes('VR02 · Antrasit'));assert.ok(!html.includes('× 0,00 cm'));
+  const updated=buildMeasurementRevision(sale,{measurements:lines.map((l,i)=>({...measurementFormForLine(l),width:i===0?180:l.width}))});
+  assert.equal(updated.pos_details.cart[0].quantity,1.8);assert.deepEqual(updated.pos_details.cart.map(l=>l.variant),values.map(r=>r.variant));
+ }
+ const other={...product,brand_name:'OBA Perdesan',category_name:'ADA'};
+ assert.equal(supportsMeasurementBatch({...other,calculation_type:'adet',product_name:'RAY KAPAĞI'}),false);
+ assert.equal(supportsMeasurementBatch({...other,calculation_type:'mt',product_name:'KARE ETEK ÇITASI'}),false);
 });
