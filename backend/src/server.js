@@ -14,10 +14,14 @@ import dashboardRoutes from "./routes/dashboard.route.js";
 import exchangeRateRoutes from "./routes/exchangeRate.route.js";
 import mailOrderCompanyRoutes from "./routes/mailOrderCompany.route.js";
 import productionRoutes from "./routes/production.route.js";
+import whatsappRoutes, { whatsappWebhookRouter } from "./routes/whatsapp.route.js";
+import { startWhatsAppWorker } from "./libs/whatsappService.js";
 
 const app = express();
 const PORT = ENV.PORT || 3000;
 
+// Signature verification must receive the exact bytes, before the global JSON parser.
+app.use("/api/whatsapp/webhook", whatsappWebhookRouter);
 app.use(express.json({ limit: "2mb" }));
 app.use(cors({
     origin: [ENV.CLIENT_URL, "http://localhost:5173"],
@@ -26,6 +30,7 @@ app.use(cors({
 }));
 app.use("/api/users", userRoutes);
 app.use("/api/production", productionRoutes);
+app.use("/api/whatsapp", whatsappRoutes);
 app.use("/api/permissions", permissionRoutes);
 app.use("/api/roles", roleRoutes);
 app.use("/api/brands", brandRoutes);
@@ -37,7 +42,8 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/exchange-rates", exchangeRateRoutes);
 app.use("/api/mail-order-companies", mailOrderCompanyRoutes);
 
-connectDB().then(() => {
+connectDB().then(async () => {
+    await startWhatsAppWorker();
     app.listen(PORT, () => {
         console.log(`Server started on: http://localhost:${PORT}`);
     });
