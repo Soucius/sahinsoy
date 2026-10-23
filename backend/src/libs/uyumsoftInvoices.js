@@ -80,8 +80,25 @@ function decimal(value) {
 }
 const integer = value => typeof value === 'string' && /^(0|[1-9]\d{0,8})$/.test(value) ? Number(value) : null;
 function invoiceRow(row) {
-  if (!uuid(row?.InvoiceId) || !text(row.DocumentId) || !text(row.TargetTitle) || !/^\d{10,11}$/.test(row.TargetTcknVkn || '') || !/^[A-Z]{3}$/.test(row.DocumentCurrencyCode || '') || !/^\d{4}-\d{2}-\d{2}T/.test(row.ExecutionDate || '') || !validDate(row.ExecutionDate.slice(0, 10))) throw new InvoiceConnectionError('Fatura bilgileri eksik veya beklenmeyen biçimde. Liste aktarılmadı.');
-  return { id: row.InvoiceId.toLowerCase(), number: row.DocumentId, supplier: row.TargetTitle, supplier_identifier: row.TargetTcknVkn, date: row.ExecutionDate.slice(0, 10), created_at: text(row.CreateDateUtc), amount: decimal(row.PayableAmount), tax: decimal(row.TaxTotal), tax_exclusive: decimal(row.TaxExclusiveAmount), currency: row.DocumentCurrencyCode, status: text(row.Status), type: text(row.InvoiceTipType), scenario: text(row.Type), archived: row.IsArchived === 'true', payment_status: 'unknown', posted_to_ledger: false };
+  // Provider installations can place the document UUID in either string field.
+  // Select only when exactly one field is a UUID; never manufacture an identity.
+  const invoiceUuid = uuid(row?.InvoiceId), documentUuid = uuid(row?.DocumentId);
+  const id = invoiceUuid && !documentUuid ? row.InvoiceId : documentUuid && !invoiceUuid ? row.DocumentId : '';
+  const number = invoiceUuid ? text(row?.DocumentId) : text(row?.InvoiceId);
+  const checks = {
+    identity: !!id && !!number,
+    supplier: !!text(row?.TargetTitle),
+    supplier_identifier: /^\d{10,11}$/.test(row?.TargetTcknVkn || ''),
+    currency: /^[A-Z]{3}$/.test(row?.DocumentCurrencyCode || ''),
+    date: /^\d{4}-\d{2}-\d{2}T/.test(row?.ExecutionDate || '') && validDate(row.ExecutionDate.slice(0, 10)),
+  };
+  const invalid = Object.keys(checks).filter(key => !checks[key]);
+  if (invalid.length) {
+    // Fixed field names only: no credentials, identifiers, amounts or XML in logs.
+    console.warn('Uyumsoft invoice schema mismatch:', invalid.join(','));
+    throw new InvoiceConnectionError('Fatura bilgileri eksik veya beklenmeyen biçimde. Liste aktarılmadı.');
+  }
+  return { id: id.toLowerCase(), number, supplier: row.TargetTitle, supplier_identifier: row.TargetTcknVkn, date: row.ExecutionDate.slice(0, 10), created_at: text(row.CreateDateUtc), amount: decimal(row.PayableAmount), tax: decimal(row.TaxTotal), tax_exclusive: decimal(row.TaxExclusiveAmount), currency: row.DocumentCurrencyCode, status: text(row.Status), type: text(row.InvoiceTipType), scenario: text(row.Type), archived: row.IsArchived === 'true', payment_status: 'unknown', posted_to_ledger: false };
 }
 export async function testInvoiceConnection(config = uyumsoftConfig(), fetchImpl = fetch) {
   const result = await call('TestConnection', config, null, fetchImpl);
