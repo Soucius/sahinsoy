@@ -31,17 +31,24 @@ test('date and page validation prevents unbounded or malformed provider queries'
   for (const q of [{ start_date: '2026-02-30' }, { start_date: ['2026-01-01'] }, { end_date: '2026-01-01' }, { start_date: '2024-01-01' }, { page: '-1' }, { page: '1e2' }, { page: ['0'] }, { page: '1000000' }]) assert.throws(() => invoiceQuery({ ...input, ...q }));
 });
 
-test('SOAP requests follow the official attribute-based contract, escape credentials, and never mutate invoice flags', async () => {
+test('HTTPS SOAP requests use the Integration WS-Security contract and never mutate invoice flags', async () => {
   const special = { ...config, username: 'u"<&', password: "p'>&" };
   let captured;
   const result = await listInboxInvoices(input, special, async (url, options) => { captured = { url, options }; return new Response(listXml()); });
   assert.equal(captured.url, UYUMSOFT_ENDPOINT);
+  assert.equal(captured.url, 'https://edonusumapi.uyum.com.tr/Services/Integration');
   assert.equal(captured.options.redirect, 'error');
-  assert.equal(captured.options.headers.SOAPAction, '"http://tempuri.org/IBasicIntegration/GetInboxInvoiceList"');
+  assert.equal(captured.options.headers.SOAPAction, '"http://tempuri.org/IIntegration/GetInboxInvoiceList"');
   const parsed = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true, parseTagValue: false }).parse(captured.options.body);
   const request = parsed.Envelope.Body.GetInboxInvoiceList;
-  assert.equal(request.userInfo['@_Username'], special.username);
-  assert.equal(request.userInfo['@_Password'], special.password);
+  const security = parsed.Envelope.Header.Security;
+  assert.equal(security['@_mustUnderstand'], '1');
+  assert.equal(security.UsernameToken.Username, special.username);
+  assert.equal(security.UsernameToken.Password['#text'], special.password);
+  assert.match(security.UsernameToken.Password['@_Type'], /#PasswordText$/);
+  assert.equal(Date.parse(security.Timestamp.Expires) - Date.parse(security.Timestamp.Created), 300000);
+  assert.ok(Math.abs(Date.now() - Date.parse(security.Timestamp.Created)) < 5000);
+  assert.equal(request.userInfo, undefined);
   assert.equal(request.query['@_PageIndex'], '0');
   assert.equal(request.query['@_OnlyNewestInvoices'], 'false');
   assert.equal(request.query.IsArchived['@_nil'], 'true');
@@ -85,7 +92,11 @@ test('SOAP faults, HTML errors, DTD/entity payloads, oversized responses and tim
 
 test('connection testing accepts only the exact successful flag response', async () => {
   const body = wrap('TestConnection', '<TestConnectionResult IsSucceded="true" Value="true"/>');
-  assert.deepEqual(await testInvoiceConnection(config, fetchXml(body)), { connected: true, read_only: true });
+  let requestBody;
+  assert.deepEqual(await testInvoiceConnection(config, async (_, options) => { requestBody = options.body; return new Response(body); }), { connected: true, read_only: true });
+  const parsed = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true }).parse(requestBody);
+  assert.match(requestBody, /<TestConnection xmlns="http:\/\/tempuri\.org\/"><\/TestConnection>/);
+  assert.equal(parsed.Envelope.Body.TestConnection.userInfo, undefined);
   await assert.rejects(testInvoiceConnection(config, fetchXml(body.replace('Value="true"', 'Value="false"'))));
 });
 
