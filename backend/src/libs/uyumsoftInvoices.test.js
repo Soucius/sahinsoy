@@ -70,6 +70,22 @@ test('invoice amounts remain exact decimal strings, including returns and mixed 
   assert.equal(Object.hasOwn(result, 'balance'), false);
 });
 
+test('invoice identity mapping accepts a UUID in either provider string field without confusing the invoice number', async () => {
+  const id = '11111111-2222-4333-8444-555555555555';
+  const reversed = await listInboxInvoices(input, config, fetchXml(listXml(row({ InvoiceId: 'TEST2026000000001', DocumentId: id }))));
+  assert.equal(reversed.invoices[0].id, id);
+  assert.equal(reversed.invoices[0].number, 'TEST2026000000001');
+  await assert.rejects(listInboxInvoices(input, config, fetchXml(listXml(row({ DocumentId: id })))));
+  await assert.rejects(listInboxInvoices(input, config, fetchXml(listXml(row({ InvoiceId: 'TEST2026000000001', DocumentId: 'TEST2026000000002' })))));
+});
+
+test('schema diagnostics expose only fixed field names and never invoice data', async t => {
+  const messages = [];
+  t.mock.method(console, 'warn', (...args) => messages.push(args.join(' ')));
+  await assert.rejects(listInboxInvoices(input, config, fetchXml(listXml(row({ TargetTitle: '', TargetTcknVkn: 'PRIVATE_IDENTIFIER', InvoiceId: 'PRIVATE_INVOICE' })))));
+  assert.deepEqual(messages, ['Uyumsoft invoice schema mismatch: identity,supplier,supplier_identifier']);
+});
+
 test('empty and paginated invoice responses retain the provider totals without creating debts', async () => {
   const empty = listXml('').replace('TotalCount="1"', 'TotalCount="0"').replace('TotalPages="1"', 'TotalPages="0"');
   assert.deepEqual((await listInboxInvoices(input, config, fetchXml(empty))).invoices, []);
