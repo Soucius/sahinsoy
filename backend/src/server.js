@@ -16,6 +16,7 @@ import mailOrderCompanyRoutes from "./routes/mailOrderCompany.route.js";
 import productionRoutes from "./routes/production.route.js";
 import whatsappRoutes, { whatsappWebhookRouter } from "./routes/whatsapp.route.js";
 import { startWhatsAppWorker } from "./libs/whatsappService.js";
+import accountingRoutes from "./routes/accounting.route.js";
 
 const app = express();
 const PORT = ENV.PORT || 3000;
@@ -41,6 +42,7 @@ app.use("/api/categories", categoryRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/exchange-rates", exchangeRateRoutes);
 app.use("/api/mail-order-companies", mailOrderCompanyRoutes);
+app.use("/api/accounting", accountingRoutes);
 
 connectDB().then(async () => {
     await startWhatsAppWorker();
