@@ -1,8 +1,8 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 
-// Uyumsoft Kurumsal BasicIntegration WSDL, retrieved 2026-10-23.
+// Uyumsoft Kurumsal HTTPS Integration WSDL, retrieved 2026-10-23.
 // This adapter exposes only TestConnection and GetInboxInvoiceList.
-export const UYUMSOFT_ENDPOINT = 'https://edonusumapi.uyum.com.tr/Services/BasicIntegration';
+export const UYUMSOFT_ENDPOINT = 'https://edonusumapi.uyum.com.tr/Services/Integration';
 const NS = 'http://tempuri.org/';
 const MAX_BYTES = 2 * 1024 * 1024;
 const text = value => typeof value === 'string' ? value.trim() : '';
@@ -30,7 +30,10 @@ const xmlAttribute = value => {
 };
 function envelope(operation, config, query) {
   const params = query ? `<query PageIndex="${query.page}" PageSize="${query.size}" OnlyNewestInvoices="false"><ExecutionStartDate>${query.start}T00:00:00+03:00</ExecutionStartDate><ExecutionEndDate>${query.end}T23:59:59.9999999+03:00</ExecutionEndDate><CreateStartDate i:nil="true"/><CreateEndDate i:nil="true"/><Status i:nil="true"/><SortColumn>ExecutionDate</SortColumn><SortMode>Descending</SortMode><IsArchived i:nil="true"/><IncludeTagList>false</IncludeTagList></query>` : '';
-  return `<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:i="http://www.w3.org/2001/XMLSchema-instance"><s:Body><${operation} xmlns="${NS}"><userInfo Username="${xmlAttribute(config.username)}" Password="${xmlAttribute(config.password)}"/>${params}</${operation}></s:Body></s:Envelope>`;
+  const created = new Date();
+  const expires = new Date(created.getTime() + 300000);
+  const security = `<o:Security s:mustUnderstand="1" xmlns:o="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"><u:Timestamp u:Id="Timestamp"><u:Created>${created.toISOString()}</u:Created><u:Expires>${expires.toISOString()}</u:Expires></u:Timestamp><o:UsernameToken u:Id="UsernameToken"><o:Username>${xmlAttribute(config.username)}</o:Username><o:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">${xmlAttribute(config.password)}</o:Password></o:UsernameToken></o:Security>`;
+  return `<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:i="http://www.w3.org/2001/XMLSchema-instance"><s:Header>${security}</s:Header><s:Body><${operation} xmlns="${NS}">${params}</${operation}></s:Body></s:Envelope>`;
 }
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', removeNSPrefix: true, parseTagValue: false, parseAttributeValue: false, trimValues: true, processEntities: true });
 function parseResponse(xml, operation) {
@@ -62,8 +65,8 @@ async function readXml(response) {
 async function call(operation, config, query, fetchImpl) {
   if (!config.configured) throw new InvoiceConnectionError('Uyumsoft web servis bağlantısı henüz kurulmadı.', 503);
   try {
-    const response = await fetchImpl(UYUMSOFT_ENDPOINT, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000), headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: `"${NS}IBasicIntegration/${operation}"` }, body: envelope(operation, config, query) });
-    if (!response.ok) throw new InvoiceConnectionError('Uyumsoft servisine ulaşılamadı. Servis erişimini kontrol edip yeniden deneyin.');
+    const response = await fetchImpl(UYUMSOFT_ENDPOINT, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000), headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: `"${NS}IIntegration/${operation}"` }, body: envelope(operation, config, query) });
+    if (!response.ok) throw new InvoiceConnectionError(`Uyumsoft servis isteği kabul edilmedi (HTTP ${response.status}). Servis hesabını ve erişim yetkisini kontrol edin.`);
     return parseResponse(await readXml(response), operation);
   } catch (error) {
     if (error instanceof InvoiceConnectionError) throw error;
