@@ -1,0 +1,103 @@
+import { useEffect, useRef, useState } from 'react';
+import api from '../libs/axios';
+import { invoiceAmount, invoiceDate } from '../libs/invoiceDisplay';
+
+const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Istanbul' }).format(new Date());
+const inputClass = 'w-full rounded-lg border border-[#d8c5ae] bg-white p-3';
+const button = 'rounded-lg border border-[#d8c5ae] bg-white px-4 py-3 font-semibold disabled:opacity-50';
+const primary = 'rounded-lg border border-[#754b2e] bg-[#754b2e] text-white px-4 py-3 font-semibold disabled:opacity-50';
+const methods = ['Nakit', 'Havale / EFT', 'Mail Order', 'Kredi Kartı', 'Diğer'];
+const categories = { supplier: 'Tedarikçiler', cargo: 'Kargo', electricity: 'Elektrik', communication: 'İletişim', personal: 'Kişi / elden hesap', other: 'Diğer' };
+const types = { opening: 'Açılış bakiyesi', debt: 'Borç ekledim', receivable: 'Alacak ekledim', payment_sent: 'Ödeme yaptım', payment_received: 'Ödeme aldım', reversal: 'Ters kayıt' };
+const fold = value => value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[ıIİ]/g, 'i').toLowerCase();
+function decimal(minor) { const n = BigInt(minor), abs = n < 0n ? -n : n; return `${n < 0n ? '-' : ''}${abs / 100n}.${String(abs % 100n).padStart(2, '0')}`; }
+function money(minor, currency) { return invoiceAmount(decimal(minor), currency); }
+function status(minor) { const n = BigInt(minor); return n > 0n ? 'Benim borcum' : n < 0n ? 'Benim alacağım' : 'Bakiye yok'; }
+function entryEffect(entry) {
+  if (entry.type === 'opening') return status(entry.delta_minor);
+  return { debt: 'Borcuma eklenen', receivable: 'Alacağıma eklenen', payment_sent: 'Ödenen', payment_received: 'Alınan', reversal: 'Düzeltme' }[entry.type];
+}
+function absolute(minor) { return BigInt(minor) < 0n ? (-BigInt(minor)).toString() : minor; }
+function parseAmount(value) {
+  if (!/^(?:0|[1-9]\d{0,9})(?:[.,]\d{1,2})?$/.test(value)) return null;
+  const [a, b = ''] = value.replace(',', '.').split('.');
+  return BigInt(a) * 100n + BigInt(b.padEnd(2, '0'));
+}
+function Field({ title, children }) { return <label className="grid gap-2 text-sm font-medium">{title}{children}</label>; }
+function Balance({ value, currency }) { return value === null ? <span className="text-amber-800 text-sm">Bakiye bekleniyor</span> : <span className={BigInt(value) > 0n ? 'text-[#8c4228]' : BigInt(value) < 0n ? 'text-[#22634d]' : 'text-[#78634f]'}><strong>{money(absolute(value), currency)}</strong><span className="block text-xs mt-1">{status(value)}</span></span>; }
+function OpeningFields({ form, setForm, creating, busy }) {
+  const known = !creating || form.opening_known;
+  return <div className="space-y-4">{creating && <><div className="grid gap-4 md:grid-cols-2"><Field title="Kişi / firma adı"><input required maxLength={120} className={inputClass} value={form.name} disabled={busy} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field title="Kategori"><select className={inputClass} disabled={busy} value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>{Object.entries(categories).map(([key, title]) => <option value={key} key={key}>{title}</option>)}</select></Field><Field title="Para birimi"><select className={inputClass} disabled={busy} value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })}><option value="TRY">TL</option><option value="EUR">EUR</option><option value="USD">USD</option></select></Field></div><label className="flex items-center gap-3"><input type="checkbox" disabled={busy} checked={form.opening_known} onChange={e => setForm({ ...form, opening_known: e.target.checked, opening_amount: e.target.checked ? '0' : '' })} />Güncel açılış bakiyesi belli</label></>}
+    {known ? <><div className="grid gap-4 md:grid-cols-2"><Field title="Açılış tarihi"><input className={inputClass} type="date" required max={today()} disabled={busy} value={form.opening_date} onChange={e => setForm({ ...form, opening_date: e.target.value })} /></Field><Field title="Açılış bakiyesi"><input className={inputClass} inputMode="decimal" required disabled={busy} placeholder="25000,50" value={form.opening_amount} onChange={e => setForm({ ...form, opening_amount: e.target.value })} /></Field><Field title="Bakiye yönü"><select className={inputClass} disabled={busy} value={form.opening_direction} onChange={e => setForm({ ...form, opening_direction: e.target.value })}><option value="owe">Benim borcum</option><option value="receivable">Bana borcu var</option></select></Field></div><p className="text-sm">Bu tarihteki net bakiyeyi gir. Önceki faturalar ve ödemeler tekrar eklenmez. Bakiye gerçekten sıfırsa 0 girebilirsin.</p></> : <p className="rounded-lg bg-amber-50 p-3 text-sm">Cari açılacak, bakiyesi “Bekleniyor” görünecek. Hesap dökümü geldiğinde açılış bakiyesini girebilirsin.</p>}
+  </div>;
+}
+
+export default function AccountLedgerPanel() {
+  const [accounts, setAccounts] = useState([]), [truncated, setTruncated] = useState(false), [search, setSearch] = useState('');
+  const [category, setCategory] = useState('all'), [addingOpening, setAddingOpening] = useState(false);
+  const [account, setAccount] = useState(null), [listBusy, setListBusy] = useState(true), [detailBusy, setDetailBusy] = useState(false), [busy, setBusy] = useState(false);
+  const [error, setError] = useState(''), [notice, setNotice] = useState(''), [creating, setCreating] = useState(false), [form, setForm] = useState(null), [reverse, setReverse] = useState(null);
+  const detailRequest = useRef(0), saving = useRef(false);
+  async function list() {
+    const response = await api.get('/accounting/accounts');
+    setAccounts(response.data.accounts); setTruncated(response.data.truncated);
+  }
+  useEffect(() => {
+    let active = true; const request = detailRequest;
+    api.get('/accounting/accounts').then(response => { if (active) { setAccounts(response.data.accounts); setTruncated(response.data.truncated); } }).catch(e => { if (active) setError(e.response?.data?.message || 'Cariler yüklenemedi.'); }).finally(() => { if (active) setListBusy(false); });
+    return () => { active = false; request.current++; };
+  }, []);
+  async function select(id) {
+    const request = ++detailRequest.current;
+    setCreating(false); setAddingOpening(false); setForm(null); setReverse(null); setError(''); setNotice(''); setDetailBusy(true); setAccount(null);
+    try { const response = await api.get(`/accounting/accounts/${id}`); if (request === detailRequest.current) setAccount(response.data); }
+    catch (e) { if (request === detailRequest.current) setError(e.response?.data?.message || 'Cari açılamadı.'); }
+    finally { if (request === detailRequest.current) setDetailBusy(false); }
+  }
+  function create() { detailRequest.current++; setDetailBusy(false); setAccount(null); setCreating(true); setAddingOpening(false); setReverse(null); setError(''); setNotice(''); setForm({ operation_id: crypto.randomUUID(), name: '', category: 'other', currency: 'TRY', opening_known: false, opening_date: today(), opening_amount: '', opening_direction: 'owe', description: '' }); }
+  function movement() { setCreating(false); setAddingOpening(false); setReverse(null); setError(''); setNotice(''); setForm({ operation_id: crypto.randomUUID(), type: 'payment_sent', date: today(), amount: '', method: 'Nakit', description: '' }); }
+  function opening() { setCreating(false); setAddingOpening(true); setReverse(null); setError(''); setNotice(''); setForm({ operation_id: crypto.randomUUID(), opening_date: today(), opening_amount: '', opening_direction: 'owe', description: '' }); }
+  async function save(event) {
+    event.preventDefault(); if (saving.current) return;
+    saving.current = true; setBusy(true); setError(''); setNotice('');
+    try {
+      const response = creating ? await api.post('/accounting/accounts', form) : addingOpening ? await api.post(`/accounting/accounts/${account.id}/opening`, { ...form, expected_revision: account.revision }) : reverse ? await api.post(`/accounting/accounts/${account.id}/entries/${reverse.target.id}/reverse`, { operation_id: reverse.operation_id, expected_revision: account.revision, reason: reverse.reason }) : await api.post(`/accounting/accounts/${account.id}/entries`, { ...form, expected_revision: account.revision, method: form.type.startsWith('payment_') ? form.method : '' });
+      setAccount(response.data); setCreating(false); setAddingOpening(false); setForm(null); setReverse(null); setNotice('Kayıt kaydedildi.');
+      try { await list(); } catch { setNotice('Kayıt kaydedildi. Cari listesini yenileyerek güncel bakiyeyi görebilirsin.'); }
+    } catch (e) { setError(e.response?.data?.message || 'Yanıt alınamadı. Yenileyip kaydın oluşup oluşmadığını kontrol et; aynı formdan tekrar denemek çift kayıt oluşturmaz.'); }
+    finally { saving.current = false; setBusy(false); }
+  }
+  async function refresh() { setError(''); setNotice(''); setListBusy(true); try { await list(); if (account) await select(account.id); } catch (e) { setError(e.response?.data?.message || 'Cariler yenilenemedi.'); } finally { setListBusy(false); } }
+  const visible = accounts.filter(a => fold(a.name).includes(fold(search)) && (category === 'all' || a.category === category));
+  const totals = visible.reduce((sum, a) => { if (a.balance_minor === null) return sum; sum[a.currency] ??= { debt: 0n, receivable: 0n }; const n = BigInt(a.balance_minor); if (n > 0n) sum[a.currency].debt += n; else sum[a.currency].receivable -= n; return sum; }, {});
+  const isOpening = creating || addingOpening;
+  const amount = form && !(creating && !form.opening_known) ? parseAmount(isOpening ? form.opening_amount : form.amount) : null;
+  const effect = amount === null ? null : isOpening ? amount * (form.opening_direction === 'owe' ? 1n : -1n) : amount * (['debt', 'payment_received'].includes(form.type) ? 1n : -1n);
+  const preview = effect === null ? null : (isOpening ? effect : BigInt(account?.balance_minor || '0') + effect).toString();
+  const reversed = new Set((account?.entries || []).filter(e => e.reverses).map(e => e.reverses));
+  return <section className="space-y-5" aria-label="Cari hesaplar">
+    <div className="flex flex-wrap justify-between gap-3 items-center"><div><h2 className="text-2xl font-bold">Cari hesaplar</h2><p className="text-sm mt-2 text-[#78634f]">Firma ve kişilerle borç, alacak ve ödemelerini takip et.</p></div><div className="flex gap-2"><button className={button} disabled={busy || detailBusy || listBusy} onClick={refresh}>Yenile</button><button className={primary} disabled={busy} onClick={create}>Cari ekle</button></div></div>
+    <p className="rounded-xl border border-[#d8c5ae] bg-[#fffaf3] p-4 text-sm">Açılış tutarı, seçtiğin tarihteki net bakiyedir. Önceki faturaları ve bu bakiyeye dahil ödemeleri tekrar ekleme. Uyumsoft faturaları ve POS mail orderları henüz otomatik işlenmez.</p>
+    {error && <p role="alert" className="rounded-xl border border-red-300 bg-red-50 p-4 text-red-800">{error}</p>}
+    {notice && <p role="status" className="rounded-xl border border-green-300 bg-green-50 p-4 text-green-900">{notice}</p>}
+    <div className="flex flex-wrap gap-4">{Object.entries(totals).map(([currency, total]) => <div key={currency} className="rounded-xl border border-[#d8c5ae] bg-white p-4 flex flex-wrap gap-8"><div><p className="text-sm">Bilinen bakiyeler · Borcum</p><strong className="text-lg text-[#8c4228]">{money(total.debt.toString(), currency)}</strong></div><div><p className="text-sm">Alacağım</p><strong className="text-lg text-[#22634d]">{money(total.receivable.toString(), currency)}</strong></div></div>)}</div>
+    {visible.some(a => a.balance_minor === null) && <p className="text-sm text-amber-900">{visible.filter(a => a.balance_minor === null).length} carinin bakiyesi bekleniyor; bu hesaplar borç/alacak toplamına dahil değil.</p>}
+    <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+      <aside className="space-y-3"><label className="grid gap-2 text-sm">Cari ara<input className={inputClass} value={search} onChange={e => setSearch(e.target.value)} placeholder="Firma veya kişi adı" /></label><Field title="Cari grubu"><select className={inputClass} value={category} onChange={e => setCategory(e.target.value)}><option value="all">Tüm gruplar</option>{Object.entries(categories).map(([key, title]) => <option value={key} key={key}>{title}</option>)}</select></Field>{listBusy ? <p>Cariler yükleniyor…</p> : visible.length ? Object.entries(categories).map(([key, title]) => { const group = visible.filter(a => a.category === key); return group.length ? <section key={key} className="space-y-2"><h3 className="font-bold text-sm pt-3">{title} ({group.length})</h3><ul className="space-y-2">{group.map(a => <li key={a.id}><button disabled={busy} className={`w-full text-left rounded-xl border p-4 flex justify-between gap-3 ${account?.id === a.id ? 'border-[#754b2e] bg-[#f4eadc]' : 'border-[#d8c5ae] bg-white'}`} onClick={() => select(a.id)}><span className="font-bold break-words">{a.name}</span><span className="text-right text-sm whitespace-nowrap"><Balance value={a.balance_minor} currency={a.currency} /></span></button></li>)}</ul></section> : null; }) : <p className="border border-dashed rounded-xl p-5 text-sm">{search || category !== 'all' ? 'Bu seçimde cari bulunamadı.' : 'Henüz cari yok. Firma veya kişi adıyla hesap açabilirsin.'}</p>}{truncated && <p className="text-amber-800">İlk 200 cari gösteriliyor. Daha fazla hesap için listeleme kapsamı genişletilmeli.</p>}</aside>
+      <div className="min-w-0 space-y-4">
+        {detailBusy && <p>Cari yükleniyor…</p>}
+        {!account && !creating && !detailBusy && <div className="rounded-2xl border border-dashed border-[#d8c5ae] p-8"><h3 className="text-lg font-bold">Bir cari seç</h3><p className="mt-3">Hesap açarken faturası olmayan elden borçları da kaydedebilirsin. Her ödemenin yöntemi ve açıklaması hesap geçmişinde görünür.</p></div>}
+        {account && <header className="rounded-2xl border border-[#d8c5ae] bg-white p-5 flex flex-wrap justify-between gap-4"><div><h3 className="text-2xl font-bold">{account.name}</h3><p className="text-sm mt-2">{categories[account.category] || 'Diğer'} · {account.opening_status === 'pending' ? 'Açılış bakiyesi bekleniyor' : `Açılış: ${invoiceDate(account.opening_date)}`}</p>{account.note && <p className="text-sm mt-2 max-w-lg">{account.note}</p>}</div><div className="text-right"><Balance value={account.balance_minor} currency={account.currency} /><button className={`${primary} mt-3`} disabled={busy} onClick={account.opening_status === 'pending' ? opening : movement}>{account.opening_status === 'pending' ? 'Bakiye gir' : 'Hareket ekle'}</button></div></header>}
+        {form && <form onSubmit={save} className="rounded-2xl border border-[#d8c5ae] bg-[#fffaf3] p-5 space-y-4" aria-label={creating ? 'Yeni cari' : addingOpening ? 'Açılış bakiyesi gir' : 'Yeni cari hareketi'}><h3 className="text-xl font-bold">{creating ? 'Yeni cari' : addingOpening ? 'Açılış bakiyesi gir' : 'Hareket ekle'}</h3>
+          {isOpening ? <OpeningFields form={form} setForm={setForm} creating={creating} busy={busy} /> : <div className="grid gap-4 md:grid-cols-2"><Field title="Hareket türü"><select className={inputClass} disabled={busy} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}>{['payment_sent', 'payment_received', 'debt', 'receivable'].map(type => <option value={type} key={type}>{types[type]}</option>)}</select></Field><Field title="İşlem tarihi"><input className={inputClass} type="date" required min={account.opening_date} max={today()} disabled={busy} value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></Field><Field title={`Tutar (${account.currency === 'TRY' ? 'TL' : account.currency})`}><input className={inputClass} inputMode="decimal" placeholder="25000,50" required disabled={busy} value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} /></Field>{form.type.startsWith('payment_') && <Field title="Ödeme yöntemi"><select className={inputClass} disabled={busy} value={form.method} onChange={e => setForm({ ...form, method: e.target.value })}>{methods.map(method => <option key={method}>{method}</option>)}</select></Field>}</div>}
+          <Field title={isOpening ? 'Açıklama / kaynak' : 'Açıklama (zorunlu)'}><textarea className={inputClass} maxLength={500} required={!isOpening} disabled={busy} rows={2} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></Field>
+          {preview !== null && <div className="rounded-lg border border-[#d8c5ae] bg-white p-3"><p className="text-sm mb-2">Kayıttan sonraki bakiye</p><Balance value={preview} currency={creating ? form.currency : account.currency} /></div>}
+          {!isOpening && form.method === 'Mail Order' && form.type.startsWith('payment_') && <p className="text-sm text-amber-900">Bu manuel cari kaydıdır; POS’ta yeni müşteri tahsilatı oluşturmaz. POS kaydını aynı borçtan ikinci kez düşürme.</p>}
+          <div className="flex gap-3"><button className={primary} disabled={busy || (!(creating && !form.opening_known) && (amount === null || (!isOpening && amount === 0n)))}>{busy ? 'Kaydediliyor…' : creating ? 'Cariyi kaydet' : addingOpening ? 'Bakiyeyi kaydet' : 'Hareketi kaydet'}</button><button type="button" className={button} disabled={busy} onClick={() => { setForm(null); setCreating(false); setAddingOpening(false); }}>Vazgeç</button></div>
+        </form>}
+        {reverse && <form onSubmit={save} className="rounded-xl border border-amber-300 bg-amber-50 p-5 space-y-4" aria-label="Kaydı geri al"><h3 className="font-bold">Kaydı geri al</h3><p>{invoiceDate(reverse.target.date)} tarihli {types[reverse.target.type].toLocaleLowerCase('tr-TR')} kaydının {money(reverse.target.amount_minor, account.currency)} tutarı ters kayıtla düzeltilecek. Eski hareket geçmişte kalır.</p><Field title="Düzeltme gerekçesi"><input required maxLength={500} className={inputClass} disabled={busy} value={reverse.reason} onChange={e => setReverse({ ...reverse, reason: e.target.value })} /></Field><div className="flex gap-3"><button className={primary} disabled={busy}>Ters kayıt oluştur</button><button className={button} type="button" disabled={busy} onClick={() => setReverse(null)}>Vazgeç</button></div></form>}
+        {account && <section aria-label="Cari hareketleri" className="space-y-3"><h3 className="text-lg font-bold">Hesap geçmişi · {account.entries.length} hareket</h3><div className="overflow-x-auto rounded-xl border border-[#d8c5ae]"><table className="w-full text-sm text-left bg-white"><thead className="bg-[#f4eadc]"><tr>{['Tarih / tür', 'Açıklama', 'Yöntem', 'Tutar', ''].map((title, i) => <th key={i} className="p-3">{title}</th>)}</tr></thead><tbody>{[...account.entries].reverse().map(entry => <tr key={entry.id} className={`border-t border-[#eadfd1] ${reversed.has(entry.id) ? 'opacity-60' : ''}`}><td className="p-3 whitespace-nowrap">{invoiceDate(entry.date)}<strong className="block mt-1">{types[entry.type]}</strong>{reversed.has(entry.id) && <span className="text-xs">Geri alındı</span>}</td><td className="p-3 min-w-48 break-words">{entry.description || '—'}<small className="block mt-1 text-[#78634f]">{entry.recorded_name}</small></td><td className="p-3">{entry.method || '—'}</td><td className="p-3 whitespace-nowrap"><strong>{money(entry.amount_minor, account.currency)}</strong><small className="block">{entryEffect(entry)}</small></td><td className="p-3">{entry.type !== 'reversal' && !reversed.has(entry.id) && BigInt(entry.amount_minor) > 0n && <button className="text-sm underline whitespace-nowrap" disabled={busy} onClick={() => { setForm(null); setError(''); setReverse({ target: entry, operation_id: crypto.randomUUID(), reason: '' }); }}>Kaydı geri al</button>}</td></tr>)}</tbody></table></div></section>}
+      </div>
+    </div>
+  </section>;
+}
