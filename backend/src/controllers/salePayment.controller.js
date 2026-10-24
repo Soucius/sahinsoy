@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Sale from "../models/Sale.js";
 import { paymentEntry, paymentVoid, PaymentInputError } from "../libs/orderPayments.js";
+import { postMailOrderLedger } from '../libs/mailOrderLedger.js';
 
 async function changePayment(req, res, voiding) {
   if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: "Sipariş kimliği geçersiz." });
@@ -12,6 +13,7 @@ async function changePayment(req, res, voiding) {
       if (!sale) throw new PaymentInputError("Sipariş bulunamadı.", 404);
       const result = voiding ? paymentVoid(sale, req.params.paymentId, req.body, req.user._id) : paymentEntry(sale, req.body, req.user._id);
       if (!result.existing) {
+        await postMailOrderLedger(sale, result.entry, req.user, session, voiding ? result.changes.void_reason : null);
         if (voiding) Object.assign(result.entry, result.changes);
         else { if (!Array.isArray(sale.payments)) sale.payments = []; sale.payments.push(result.entry);
           if (result.entry.mark_delivered && sale.status === "tamamlandi") {
