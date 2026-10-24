@@ -27,7 +27,7 @@ function text(value, max, label) {
   return value.trim();
 }
 export function paymentEntry(sale, input, actor, now = new Date()) {
-  object(input, ["request_id", "expected_revision", "amount", "method", "kind", "paid_date", "note", "company", "mark_delivered"]);
+  object(input, ["request_id", "expected_revision", "amount", "method", "kind", "paid_date", "note", "company", "ledger_account_id", "mark_delivered"]);
   if (typeof input.request_id !== "string" || !/^[a-zA-Z\d_-]{8,100}$/.test(input.request_id)) throw new PaymentInputError("Tahsilat işlem kimliği geçersiz.");
   if (typeof input.amount !== "number" || !Number.isFinite(input.amount) || input.amount <= 0 || !Number.isSafeInteger(cent(input.amount)) || Math.abs(cent(input.amount) / 100 - input.amount) > 0.0000001) throw new PaymentInputError("Tahsilat tutarını pozitif ve en fazla iki ondalık olarak girin.");
   if (!PAYMENT_METHODS.includes(input.method) || !PAYMENT_KINDS.includes(input.kind)) throw new PaymentInputError("Tahsilat türünü ve ödeme yöntemini seçin.");
@@ -35,11 +35,13 @@ export function paymentEntry(sale, input, actor, now = new Date()) {
   const note = text(input.note ?? "", 500, "Tahsilat notu");
   const company = text(input.company ?? "", 120, "Mail order firması");
   if (company && input.method !== "Mail Order") throw new PaymentInputError("Firma seçimi yalnız mail order tahsilatında kullanılabilir.");
+  const ledgerAccountId = input.ledger_account_id ?? '';
+  if (typeof ledgerAccountId !== 'string' || !/^(?:[a-f\d]{24})?$/i.test(ledgerAccountId) || (ledgerAccountId && input.method !== 'Mail Order')) throw new PaymentInputError('Mail order cari hesabını kontrol edin.');
   if (input.mark_delivered !== undefined && typeof input.mark_delivered !== "boolean") throw new PaymentInputError("Teslim seçimini kontrol edin.");
-  const entry = { mark_delivered: input.mark_delivered ?? false, request_id: input.request_id, amount: cent(input.amount) / 100, method: input.method, kind: input.kind, paid_date: input.paid_date, note, company };
+  const entry = { mark_delivered: input.mark_delivered ?? false, request_id: input.request_id, amount: cent(input.amount) / 100, method: input.method, kind: input.kind, paid_date: input.paid_date, note, company, ledger_account_id: ledgerAccountId.toLowerCase() };
   const prior = (sale.payments || []).find((item) => item.request_id === entry.request_id);
   if (prior) {
-    if (Object.keys(entry).some((key) => (key === "company" ? plain(prior)[key] ?? "" : key === "mark_delivered" ? plain(prior)[key] ?? false : plain(prior)[key]) !== entry[key])) throw new PaymentInputError("Aynı tahsilat işlem kimliği farklı bilgilerle kullanılamaz.", 409);
+    if (Object.keys(entry).some((key) => (["company", "ledger_account_id"].includes(key) ? plain(prior)[key] ?? "" : key === "mark_delivered" ? plain(prior)[key] ?? false : plain(prior)[key]) !== entry[key])) throw new PaymentInputError("Aynı tahsilat işlem kimliği farklı bilgilerle kullanılamaz.", 409);
     return { existing: true, entry: prior };
   }
   if (!["tamamlandi", "teslim_edildi"].includes(sale.status)) throw new PaymentInputError("Tahsilat yalnız onaylanmış veya teslim edilmiş siparişe eklenebilir.", 409);
