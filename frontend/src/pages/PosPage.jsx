@@ -759,7 +759,7 @@ export default function PosPage() {
 
   return <div className="curtain-pos">
     <style>{POS_STYLE}</style>
-    <header className="pos-brand"><img src="/sahinsoy-logo.svg" alt="Şahinsoy Perde ve Döşemelik logosu" /><div><h1>Şahinsoy POS</h1><p className="muted">Satış ve sipariş ekranı</p></div></header>
+    <header className="pos-brand"><div><h1 className="brand-name">ŞAHİNSOY</h1><p className="muted">Satış ve sipariş ekranı</p></div></header>
     <aside className="notice" aria-label="Günlük döviz kurları">
       <div className="row" style={{ justifyContent: "space-between" }}><strong>TCMB · Günlük döviz satış kuru</strong><button type="button" disabled={fxLoading || processing} onClick={refreshRates}>{fxLoading ? <Loader2 className="spin" size={16} /> : null}{fxError ? "Kuru yeniden dene" : "Kurları yenile"}</button></div>
       <div role="status">{fxLoading ? <p className="muted">Günlük kur yükleniyor…</p> : fxQuote && <p>USD: <strong>{formatExchangeRate(fxQuote.rates.USD)} ₺</strong> · EUR: <strong>{formatExchangeRate(fxQuote.rates.EUR)} ₺</strong> · Kur tarihi: {formatRateDate(fxQuote.rate_date)}</p>}{fxError && <p className="error">{fxError} Dövizli üründe elle kur girebilir veya yeniden deneyebilirsiniz.</p>}</div>
