@@ -3,9 +3,7 @@ import {ArrowRight} from 'lucide-react';
 export default function HomePage(){
   const signedIn=Boolean(localStorage.getItem('token'));
   return <div className="home-shell"><main className="home-card">
-    <img src="/sahinsoy-logo.svg" className="home-brand" alt="Şahinsoy Perde ve Döşemelik · 1987"/>
-    <p className="uppercase tracking-widest text-sm mb-4">Mağazanızın sıcaklığı, işinizin düzeni</p>
-    <h1 className="home-title">Şahinsoy POS</h1>
+    <h1 className="home-title brand-name">ŞAHİNSOY</h1>
     <p className="text-xl mt-5">Satış ve sipariş ekranı</p>
     <Link className="home-button gap-3" to={signedIn?'/dashboard/pos':'/signin'}>{signedIn?'Satış ekranını aç':'Giriş yap'}<ArrowRight size={21}/></Link>
     <div className="home-features">
