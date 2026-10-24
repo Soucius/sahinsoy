@@ -15,7 +15,7 @@ export default function ProductionSigninPage() {
   }
   return <main className="min-h-screen flex items-center justify-center p-5">
     <section className="w-full max-w-md rounded-3xl border border-[#d8c5ae] bg-[#fffcf6] p-7 shadow-sm">
-      <img className="brand-logo mx-auto" src="/sahinsoy-logo.svg" alt="Şahinsoy" />
+      <strong className="brand-name text-center">ŞAHİNSOY</strong>
       <h1 className="text-3xl font-bold text-center mt-4">Üretim paneli</h1>
       <p className="text-center mt-3 mb-7 text-[#78634f]">Size atanan kesim, dikim ve montaj işleri.</p>
       <form onSubmit={submit} className="space-y-5">
