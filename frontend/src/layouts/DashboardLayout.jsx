@@ -132,9 +132,9 @@ const DashboardLayout = () => {
         ${isSidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
       `}
       >
-        <div className="min-h-28 flex items-center px-6 py-4 border-b border-gray-100">
+        <div className="min-h-20 flex items-center px-6 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
-            <div><img src="/sahinsoy-logo.svg" alt="Şahinsoy Perde ve Döşemelik" className="brand-logo"/><strong className="block mt-2 text-center">Şahinsoy POS</strong></div>
+            <strong className="brand-name brand-name-sidebar">ŞAHİNSOY</strong>
           </div>
 
           <button
