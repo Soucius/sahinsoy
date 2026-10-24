@@ -96,10 +96,11 @@ export function ledgerMovement(account, input, actor, now = new Date()) {
   const delta = (BigInt(amount) * (positive ? 1n : -1n)).toString();
   return { existing: false, entry: recorded({ ...data, operation_id: operation, fingerprint, delta_minor: delta, reverses: '' }, actor, now), balance_minor: (BigInt(account.balance_minor) + BigInt(delta)).toString() };
 }
-export function reverseLedgerMovement(account, targetId, input, actor, now = new Date()) {
+export function reverseLedgerMovement(account, targetId, input, actor, now = new Date(), linkedPayment = false) {
   object(input, ['operation_id', 'expected_revision', 'reason']);
   const target = account.entries.find(entry => entry.operation_id === targetId);
   if (!target) throw new LedgerInputError('Hareket bulunamadı.', 404);
+  if (target.source_payment_id && !linkedPayment) throw new LedgerInputError('Bu hareket POS tahsilatına bağlı. Düzeltmeyi siparişin tahsilat ekranından yapın.', 409);
   if (target.type === 'reversal' || BigInt(target.amount_minor) === 0n) throw new LedgerInputError('Bu hareket ters kayıtla düzeltilemez.');
   const reason = text(input.reason ?? '', 500, 'Düzeltme gerekçesi', true);
   const operation = operationId(input.operation_id), fingerprint = hash({ target: targetId, reason }), prior = priorOperation(account, operation, fingerprint);
@@ -112,6 +113,6 @@ export function reverseLedgerMovement(account, targetId, input, actor, now = new
 }
 export function ledgerPublic(account, detail = false) {
   const result = { id: String(account._id), name: account.name, category: account.category, note: account.note, currency: account.currency, opening_status: account.opening_status, opening_date: account.opening_date, balance_minor: account.balance_minor, revision: account.revision, updated_at: account.updatedAt };
-  if (detail) result.entries = account.entries.map(entry => ({ id: entry.operation_id, type: entry.type, date: entry.date, amount_minor: entry.amount_minor, delta_minor: entry.delta_minor, method: entry.method, description: entry.description, reverses: entry.reverses, recorded_at: entry.recorded_at, recorded_name: entry.recorded_name }));
+  if (detail) result.entries = account.entries.map(entry => ({ id: entry.operation_id, type: entry.type, date: entry.date, amount_minor: entry.amount_minor, delta_minor: entry.delta_minor, method: entry.method, description: entry.description, reverses: entry.reverses, source_sale_id: entry.source_sale_id || '', source_payment_id: entry.source_payment_id || '', recorded_at: entry.recorded_at, recorded_name: entry.recorded_name }));
   return result;
 }
