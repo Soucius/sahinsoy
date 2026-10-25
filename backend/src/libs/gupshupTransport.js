@@ -4,6 +4,15 @@ import { createHash } from 'node:crypto';
 const tokens = new Map();
 const uuid = /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i;
 export const isGupshupId = value => typeof value === 'string' && uuid.test(value);
+// Only used to reject expired manually supplied TEST tokens. Gupshup still
+// verifies the JWT signature and application permissions on the send request.
+export function validGupshupTestToken(token, now = Date.now()) {
+  if (typeof token !== 'string' || token.length > 10000 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)) return false;
+  try {
+    const { exp } = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+    return Number.isFinite(exp) && exp * 1000 > now + 60000 && exp * 1000 <= now + 25 * 3600000;
+  } catch { return false; }
+}
 const authKey = config => createHash('sha256').update(config.gupshupAppId + ':' + config.gupshupSecret).digest('hex');
 class AccessFailure extends Error {
   constructor(reason) { super('Gupshup access failed'); this.reason = reason; }
@@ -21,6 +30,10 @@ const accessFailureDetails = {
 export function clearGupshupToken(config) { tokens.delete(authKey(config)); }
 
 async function accessToken(config, send) {
+  if (config.mode === 'test' && config.gupshupTestToken) {
+    if (!validGupshupTestToken(config.gupshupTestToken)) throw new AccessFailure('expiry');
+    return config.gupshupTestToken;
+  }
   const key = authKey(config), cached = tokens.get(key);
   if (cached?.expires > Date.now() + 60000) return cached.token;
   const res = await send('https://api.gupshup.io/wa/app/' + config.gupshupAppId + '/auth/app-token', {
