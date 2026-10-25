@@ -91,6 +91,21 @@ test('provider acceptance is not delivery; uncertain sends are never retried aut
   clearGupshupToken(config);
 });
 
+test('auth diagnostics distinguish provider rejection without exposing secrets or sending a message', async () => {
+  for (const status of [401, 403, 404, 429, 500]) {
+    clearGupshupToken(config);
+    let calls = 0;
+    const result = await sendGupshupNotification(messagePayload(notification(config), config), config, async url => {
+      calls++; assert.ok(url.endsWith('/auth/app-token'));
+      return { ok:false, status, json:async () => ({ error:config.gupshupSecret }) };
+    });
+    assert.equal(result.status, 'failed'); assert.equal(calls, 1);
+    assert.ok(result.detail.includes(status === 500 ? 'geçici hata' : String(status)));
+    assert.equal(JSON.stringify(result).includes(config.gupshupSecret), false);
+  }
+  clearGupshupToken(config);
+});
+
 test('delivery callbacks require the private header and matching app and sender', async t => {
   let writes = 0;
   t.mock.method(Receipt, 'updateOne', async () => { writes++; });
