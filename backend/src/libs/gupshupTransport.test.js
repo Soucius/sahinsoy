@@ -194,3 +194,22 @@ test('authenticated provider-side failures can be recorded before Meta assigns s
   const unsigned = response(); await receiveGupshupWebhook(req(failed, ''), unsigned, config);
   assert.equal(unsigned.statusCode, 401); assert.equal(writes.length, 1);
 });
+
+test('delivery failures retain only bounded numeric diagnostics and expose a safe Turkish explanation', async t => {
+  const journal = []; const notifications = [];
+  t.mock.method(Receipt, 'updateOne', async (filter, update) => { journal.push({ ...filter, ...update.$set }); });
+  t.mock.method(Receipt, 'find', () => query(() => journal));
+  t.mock.method(Notification, 'updateOne', async (_filter, update) => { notifications.push(update.$set); });
+  const failed = event('failed');
+  failed.entry[0].changes[0].value.statuses[0].errors = [{ code: 132001, title: 'private-provider-title', error_data: { details: config.gupshupSecret } }];
+  await receiveGupshupWebhook(req(failed), response(), config);
+  assert.equal(journal[0].error_code, 132001);
+  assert.match(notifications.at(-1).detail, /kod 132001/);
+  assert.match(notifications.at(-1).detail, /şablonu veya dili/);
+  assert.doesNotMatch(JSON.stringify([journal, notifications]), /private-provider-title|synthetic-account-secret/);
+  for (const invalid of ['private-provider-code', '132001 secret', {}, -1, 1.5, 9999999, null]) {
+    failed.entry[0].changes[0].value.statuses[0].errors[0].code = invalid;
+    await receiveGupshupWebhook(req(failed), response(), config);
+    assert.equal(journal.at(-1).error_code, undefined);
+  }
+});
