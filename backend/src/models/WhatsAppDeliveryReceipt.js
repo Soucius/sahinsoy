@@ -6,6 +6,7 @@ const schema = new mongoose.Schema({
   provider_id: { type: String, required: true, maxlength: 36 },
   recipient: { type: String, required: true, maxlength: 15 },
   status: { type: String, required: true, enum: ['sent', 'delivered', 'read', 'failed'] },
+  error_code: { type: Number, min: 1, max: 999999, validate: Number.isInteger },
   createdAt: { type: Date, default: Date.now },
   expiresAt: { type: Date, default: () => new Date(Date.now() + 5 * 86400000) },
 });
