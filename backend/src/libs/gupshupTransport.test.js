@@ -15,6 +15,7 @@ const env = { WHATSAPP_PROVIDER: 'gupshup', WHATSAPP_MODE: 'test', WHATSAPP_PHON
 const config = whatsappConfig(env);
 const notification = c => ({ _id: '900000000000000000000001', mode: c.mode, kind: 'connection_test', config_signature: connectionSignature(c), recipient: '4915100000000', customer_name: 'Should not leave sandbox', order_code: 'PRIVATE' });
 const okToken = () => ({ ok: true, json: async () => ({ token: 'synthetic-jwt-value-without-real-access', expiresAt: new Date(Date.now() + 23 * 3600000).toISOString() }) });
+const testJwt = exp => [Buffer.from('{"alg":"HS256"}').toString('base64url'), Buffer.from(JSON.stringify({ exp })).toString('base64url'), 'syntheticSignature'].join('.');
 const query = read => ({ sort() { return this; }, limit() { return this; }, lean() { return this; }, then(resolve, reject) { return Promise.resolve().then(read).then(resolve, reject); } });
 const response = () => ({ statusCode: 200, sendStatus(code) { this.statusCode = code; return this; } });
 const event = (status = 'delivered', extra = {}) => ({ object: 'whatsapp_business_account', gs_app_id: app, entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: config.phoneId }, statuses: [{ gs_id: message, id: 'wamid.different-provider-id', recipient_id: config.testRecipient, status }] } }] }], ...extra });
@@ -74,6 +75,33 @@ test('failed or expired CAT never sends a message or exposes provider secrets', 
   }
   const failed = await sendGupshupNotification(messagePayload(notification(config), config), config, async () => { throw new Error(config.gupshupSecret); });
   assert.equal(failed.status, 'failed'); assert.equal(JSON.stringify(failed).includes(config.gupshupSecret), false);
+});
+
+test('a manually generated CAT is restricted to TEST and expires closed without exposing its value', async () => {
+  const token = testJwt(Math.floor(Date.now() / 1000) + 23 * 3600);
+  const manual = whatsappConfig({ ...env, GUPSHUP_CUSTOMER_SECRET: '', GUPSHUP_TEST_APP_TOKEN: token });
+  assert.equal(manual.enabled, true);
+  assert.equal(JSON.stringify(publicConnection(manual)).includes(token), false);
+  assert.equal(connectionSignature(manual), connectionSignature(config));
+  let calls = 0;
+  const result = await sendGupshupNotification(messagePayload(notification(manual), manual), manual, async (url, options) => {
+    calls++;
+    assert.equal(url, 'https://api.gupshup.io/wa/api/v1/template/msg');
+    assert.equal(options.headers.Authorization, 'Bearer ' + token);
+    assert.equal(new URLSearchParams(options.body).get('destination'), config.testRecipient);
+    return { ok: true, status: 202, json: async () => ({ status: 'submitted', messageId: message }) };
+  });
+  assert.equal(result.status, 'accepted'); assert.equal(calls, 1);
+  const live = whatsappConfig({ ...env, WHATSAPP_MODE: 'live', GUPSHUP_TEST_APP_TOKEN: token });
+  assert.equal(live.gupshupTestToken, '');
+  assert.equal(whatsappConfig({ ...env, WHATSAPP_MODE: 'live', GUPSHUP_CUSTOMER_SECRET: '', GUPSHUP_TEST_APP_TOKEN: token }).enabled, false);
+  for (const invalid of ['malformed-token', testJwt(Math.floor(Date.now() / 1000) - 1), testJwt(Math.floor(Date.now() / 1000) + 26 * 3600)]) {
+    assert.equal(whatsappConfig({ ...env, GUPSHUP_TEST_APP_TOKEN: invalid }).enabled, false);
+    let networkCalls = 0;
+    const failed = await sendGupshupNotification({}, { ...manual, gupshupTestToken: invalid }, async () => { networkCalls++; });
+    assert.equal(failed.status, 'failed'); assert.equal(networkCalls, 0);
+    assert.equal(JSON.stringify(failed).includes(invalid), false);
+  }
 });
 
 test('provider acceptance is not delivery; uncertain sends are never retried automatically', async () => {
