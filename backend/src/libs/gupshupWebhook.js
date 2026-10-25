@@ -31,7 +31,7 @@ export async function receiveGupshupWebhook(req, res, config) {
     for (const entry of payload.entry) for (const change of Array.isArray(entry.changes) ? entry.changes : []) {
       const value = change.value;
       if (change.field !== 'messages' || !Array.isArray(value?.statuses)) continue;
-      if (value.metadata?.phone_number_id && value.metadata.phone_number_id !== config.phoneId) continue;
+      if (value.metadata?.phone_number_id && value.metadata.phone_number_id !== (config.gupshupPhoneId || config.phoneId)) continue;
       for (const status of value.statuses) {
         const recipient = whatsappPhone(status.recipient_id);
         if (!recipient || !allowed[status.status] || !isGupshupId(status.gs_id)) continue;
