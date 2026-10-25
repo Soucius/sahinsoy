@@ -166,6 +166,24 @@ test('early delivery callback is journaled and applied after HTTP response estab
   assert.ok(journal.every(r => r.provider_id === message && !('payload' in r)));
 });
 
+test('shop callback identity replaces the legacy sandbox sender without duplicating pending notifications', async t => {
+  const migrated = whatsappConfig({ ...env, GUPSHUP_PHONE_NUMBER_ID: '200000000000002' });
+  assert.equal(migrated.enabled, true);
+  assert.equal(connectionSignature(migrated), connectionSignature(config));
+  assert.equal(whatsappConfig({ ...env, GUPSHUP_PHONE_NUMBER_ID: 'invalid' }).enabled, false);
+  const writes = [];
+  t.mock.method(Receipt, 'updateOne', async filter => writes.push(filter));
+  t.mock.method(Receipt, 'find', () => query(() => []));
+  const shopEvent = event(); shopEvent.entry[0].changes[0].value.metadata.phone_number_id = migrated.gupshupPhoneId;
+  await receiveGupshupWebhook(req(shopEvent), response(), migrated);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].config_signature, connectionSignature(config));
+  await receiveGupshupWebhook(req(event()), response(), migrated);
+  const unknownSender = event(); unknownSender.entry[0].changes[0].value.metadata.phone_number_id = '300000000000003';
+  await receiveGupshupWebhook(req(unknownSender), response(), migrated);
+  assert.equal(writes.length, 1);
+});
+
 test('authenticated provider-side failures can be recorded before Meta assigns sender metadata', async t => {
   const writes = [];
   t.mock.method(Receipt, 'updateOne', async (filter) => writes.push(filter));
