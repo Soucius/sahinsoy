@@ -26,11 +26,15 @@ export function whatsappConfig(env = process.env) {
   config.gupshupSecret = env.GUPSHUP_CUSTOMER_SECRET || '';
   config.gupshupTestToken = mode === 'test' ? env.GUPSHUP_TEST_APP_TOKEN || '' : '';
   config.gupshupSource = whatsappPhone(env.GUPSHUP_SOURCE_PHONE);
+  // Separate callback identity preserves existing send/idempotency signatures
+  // when migrating from the old Meta sandbox sender to the shop's Gupshup line.
+  config.gupshupPhoneId = env.GUPSHUP_PHONE_NUMBER_ID || config.phoneId;
   config.gupshupStoreTemplate = env.GUPSHUP_STORE_TEMPLATE_ID || '';
   config.gupshupInstallationTemplate = env.GUPSHUP_INSTALLATION_TEMPLATE_ID || '';
   config.gupshupWebhookToken = env.GUPSHUP_WEBHOOK_TOKEN || '';
   if (config.provider === 'gupshup') {
     if (!isGupshupId(config.gupshupAppId) || !config.gupshupSource) missing.push('Gupshup uygulama ve mağaza numarası');
+    if (!/^\d{5,30}$/.test(config.gupshupPhoneId)) missing.push('Gupshup gönderici numara kimliği');
     if (config.gupshupTestToken) {
       if (!validGupshupTestToken(config.gupshupTestToken)) missing.push('Deneme erişim anahtarının süresi veya biçimi');
     } else if (config.gupshupSecret.length < 24) missing.push('Gupshup hesap anahtarı');
