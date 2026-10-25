@@ -1,5 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
-import { isGupshupId } from './gupshupTransport.js';
+import { isGupshupId, validGupshupTestToken } from './gupshupTransport.js';
 
 export function whatsappPhone(value) {
   if (typeof value !== 'string' || !/^[+\d\s().-]+$/.test(value)) return '';
@@ -24,13 +24,16 @@ export function whatsappConfig(env = process.env) {
   if (!['meta', 'gupshup'].includes(config.provider)) missing.push('Mesaj sağlayıcısı');
   config.gupshupAppId = env.GUPSHUP_APP_ID || '';
   config.gupshupSecret = env.GUPSHUP_CUSTOMER_SECRET || '';
+  config.gupshupTestToken = mode === 'test' ? env.GUPSHUP_TEST_APP_TOKEN || '' : '';
   config.gupshupSource = whatsappPhone(env.GUPSHUP_SOURCE_PHONE);
   config.gupshupStoreTemplate = env.GUPSHUP_STORE_TEMPLATE_ID || '';
   config.gupshupInstallationTemplate = env.GUPSHUP_INSTALLATION_TEMPLATE_ID || '';
   config.gupshupWebhookToken = env.GUPSHUP_WEBHOOK_TOKEN || '';
   if (config.provider === 'gupshup') {
     if (!isGupshupId(config.gupshupAppId) || !config.gupshupSource) missing.push('Gupshup uygulama ve mağaza numarası');
-    if (config.gupshupSecret.length < 24) missing.push('Gupshup hesap anahtarı');
+    if (config.gupshupTestToken) {
+      if (!validGupshupTestToken(config.gupshupTestToken)) missing.push('Deneme erişim anahtarının süresi veya biçimi');
+    } else if (config.gupshupSecret.length < 24) missing.push('Gupshup hesap anahtarı');
     if (!isGupshupId(config.gupshupStoreTemplate) || (mode === 'live' && !isGupshupId(config.gupshupInstallationTemplate))) missing.push('Onaylı Gupshup mesaj şablonları');
   } else if (!config.token) missing.push('Erişim anahtarı');
   if (!/^\d{5,30}$/.test(config.phoneId)) missing.push('Gönderici numara kimliği');
