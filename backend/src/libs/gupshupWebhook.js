@@ -1,6 +1,6 @@
 import Receipt from '../models/WhatsAppDeliveryReceipt.js';
 import Notification from '../models/WhatsAppNotification.js';
-import { connectionSignature, validVerifyToken, whatsappPhone } from './whatsappNotifications.js';
+import { connectionSignature, providerError, validVerifyToken, whatsappPhone } from './whatsappNotifications.js';
 import { isGupshupId } from './gupshupTransport.js';
 
 const allowed = {
@@ -9,6 +9,8 @@ const allowed = {
   read: ['sending', 'unknown', 'accepted', 'sent', 'delivered', 'failed'],
   failed: ['sending', 'unknown', 'accepted', 'sent'],
 };
+const safeErrorCode = value => (typeof value === 'number' || typeof value === 'string') && /^\d{1,6}$/.test(String(value)) && Number(value) > 0 ? Number(value) : undefined;
+const failureDetail = code => code ? `Gupshup teslim hatası (kod ${code}). ${providerError(code)}` : 'Gupshup mesajın teslim edilemediğini bildirdi.';
 export async function applyGupshupReceipts(providerId, config) {
   if (!isGupshupId(providerId)) return;
   const signature = connectionSignature(config);
@@ -17,7 +19,7 @@ export async function applyGupshupReceipts(providerId, config) {
     if (!allowed[r.status]) continue;
     await Notification.updateOne({
       config_signature: signature, provider_id: providerId, recipient: r.recipient, status: { $in: allowed[r.status] },
-    }, { $set: { status: r.status, detail: r.status === 'failed' ? 'Gupshup mesajın teslim edilemediğini bildirdi.' : '' } });
+    }, { $set: { status: r.status, detail: r.status === 'failed' ? failureDetail(safeErrorCode(r.error_code)) : '' } });
   }
 }
 export async function receiveGupshupWebhook(req, res, config) {
@@ -39,8 +41,11 @@ export async function receiveGupshupWebhook(req, res, config) {
         // Gupshup request id still bind these to our own outgoing notification.
         if (!value.metadata?.phone_number_id && status.status !== 'failed') continue;
         const event = { config_signature: connectionSignature(config), provider_id: status.gs_id, recipient, status: status.status };
+        // Retain only a bounded numeric code, never provider titles, request
+        // bodies, message text, credentials or incoming customer conversations.
+        const errorCode = status.status === 'failed' ? safeErrorCode(status.errors?.[0]?.code) : undefined;
         // Journal before lookup: a delivery callback can beat the send HTTP response.
-        try { await Receipt.updateOne(event, { $setOnInsert: event }, { upsert: true, runValidators: true }); }
+        try { await Receipt.updateOne(event, { $setOnInsert: event, ...(errorCode ? { $set: { error_code: errorCode } } : {}) }, { upsert: true, runValidators: true }); }
         catch (error) { if (error.code !== 11000) throw error; }
         await applyGupshupReceipts(status.gs_id, config);
       }
