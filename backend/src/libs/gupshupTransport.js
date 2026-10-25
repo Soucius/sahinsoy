@@ -5,6 +5,19 @@ const tokens = new Map();
 const uuid = /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i;
 export const isGupshupId = value => typeof value === 'string' && uuid.test(value);
 const authKey = config => createHash('sha256').update(config.gupshupAppId + ':' + config.gupshupSecret).digest('hex');
+class AccessFailure extends Error {
+  constructor(reason) { super('Gupshup access failed'); this.reason = reason; }
+}
+const accessFailureDetails = {
+  unauthorized: 'Gupshup erişim anahtarını kabul etmedi (401). Mesaj gönderilmedi.',
+  forbidden: 'Gupshup bu anahtara uygulama erişimi vermedi (403). Mesaj gönderilmedi.',
+  not_found: 'Gupshup uygulama erişim adresi bulunamadı (404). Mesaj gönderilmedi.',
+  limited: 'Gupshup erişim isteklerini geçici olarak sınırladı (429). Mesaj gönderilmedi.',
+  unavailable: 'Gupshup erişim sunucusu geçici hata verdi. Mesaj gönderilmedi.',
+  format: 'Gupshup erişim yanıtının biçimi doğrulanamadı. Mesaj gönderilmedi.',
+  token: 'Gupshup erişim yanıtındaki anahtar doğrulanamadı. Mesaj gönderilmedi.',
+  expiry: 'Gupshup erişim anahtarının geçerlilik zamanı doğrulanamadı. Mesaj gönderilmedi.',
+};
 export function clearGupshupToken(config) { tokens.delete(authKey(config)); }
 
 async function accessToken(config, send) {
@@ -14,8 +27,12 @@ async function accessToken(config, send) {
     method: 'POST', headers: { 'X-Customer-Secret': config.gupshupSecret },
     signal: AbortSignal.timeout(10000), redirect: 'error',
   });
-  const data = await res.json(), expires = Date.parse(data?.expiresAt);
-  if (!res.ok || typeof data?.token !== 'string' || !/^[A-Za-z0-9._~-]{16,10000}$/.test(data.token) || !Number.isFinite(expires) || expires < Date.now() + 60000 || expires > Date.now() + 25 * 3600000) throw new Error('Gupshup sunucu erişimi doğrulanamadı.');
+  if (!res.ok) throw new AccessFailure(({ 401: 'unauthorized', 403: 'forbidden', 404: 'not_found', 429: 'limited' })[res.status] || 'unavailable');
+  let data;
+  try { data = await res.json(); } catch { throw new AccessFailure('format'); }
+  const expires = Date.parse(data?.expiresAt);
+  if (typeof data?.token !== 'string' || !/^[A-Za-z0-9._~-]{16,10000}$/.test(data.token)) throw new AccessFailure('token');
+  if (!Number.isFinite(expires) || expires < Date.now() + 60000 || expires > Date.now() + 25 * 3600000) throw new AccessFailure('expiry');
   // This application uses one provider account; discard expired/previous credentials.
   tokens.clear();
   tokens.set(key, { token: data.token, expires });
@@ -25,7 +42,7 @@ async function accessToken(config, send) {
 export async function sendGupshupNotification(payload, config, send = fetch) {
   let token;
   try { token = await accessToken(config, send); }
-  catch { return { status: 'failed', detail: 'Gupshup sunucu erişimi doğrulanamadı; mesaj gönderilmedi.' }; }
+  catch (error) { return { status: 'failed', detail: error instanceof AccessFailure ? accessFailureDetails[error.reason] : 'Gupshup sunucu erişimi doğrulanamadı; mesaj gönderilmedi.' }; }
   let res, data;
   try {
     res = await send('https://api.gupshup.io/wa/api/v1/template/msg', {
