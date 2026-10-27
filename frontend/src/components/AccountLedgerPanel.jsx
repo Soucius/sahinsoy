@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../libs/axios';
 import { invoiceAmount, invoiceDate } from '../libs/invoiceDisplay';
-import { GOLD_UNITS, isGoldUnit, goldQuantity, goldQuantityValid } from '../libs/goldLedger';
+import { GOLD_UNITS, isGoldUnit, isValuedUnit, goldQuantity, goldQuantityValid } from '../libs/goldLedger';
 import useGoldRates from '../libs/useGoldRates';
 import GoldEquivalent from './GoldEquivalent.jsx';
+import LedgerTotalSummary from './LedgerTotalSummary.jsx';
 
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Istanbul' }).format(new Date());
 const inputClass = 'w-full rounded-lg border border-[#d8c5ae] bg-white p-3';
@@ -41,7 +42,7 @@ export default function AccountLedgerPanel() {
   const [account, setAccount] = useState(null), [listBusy, setListBusy] = useState(true), [detailBusy, setDetailBusy] = useState(false), [busy, setBusy] = useState(false);
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [creating, setCreating] = useState(false), [form, setForm] = useState(null), [reverse, setReverse] = useState(null);
   const detailRequest = useRef(0), saving = useRef(false);
-  const goldEnabled = accounts.some(a => isGoldUnit(a.currency)) || isGoldUnit(form?.currency);
+  const goldEnabled = accounts.some(a => isValuedUnit(a.currency)) || isGoldUnit(form?.currency);
   const goldRates = useGoldRates(goldEnabled);
   async function list() {
     const response = await api.get('/accounting/accounts');
@@ -85,9 +86,11 @@ export default function AccountLedgerPanel() {
   return <section className="space-y-5" aria-label="Cari hesaplar">
     <div className="flex flex-wrap justify-between gap-3 items-center"><div><h2 className="text-2xl font-bold">Cari hesaplar</h2><p className="text-sm mt-2 text-[#78634f]">Firma ve kişilerle borç, alacak ve ödemelerini takip et.</p></div><div className="flex flex-col gap-2"><button className={button} disabled={busy || detailBusy || listBusy} onClick={refresh}>Yenile</button><button className={primary} disabled={busy} onClick={() => create()}>Cari ekle</button><button className={button} disabled={busy} onClick={() => create(true)}>Altın borcu ekle</button></div></div>
     <p className="rounded-xl border border-[#d8c5ae] bg-[#fffaf3] p-4 text-sm">Açılış tutarı, seçtiğin tarihteki net bakiyedir. Önceki faturaları ve bu bakiyeye dahil ödemeleri tekrar ekleme. Yeni POS mail order tahsilatları seçilen cariye alacak hareketi olarak işlenir. Eski tahsilatlar tekrar düşülmez. Uyumsoft faturaları henüz otomatik işlenmez.</p>
-    {goldEnabled && <div className="rounded-xl border border-[#d8c5ae] bg-[#fffaf3] p-4 text-sm space-y-2"><div className="flex flex-wrap items-center justify-between gap-3"><strong>Altın carileri · Harem satış kuru</strong><button className={button} disabled={goldRates.busy} onClick={goldRates.refresh}>{goldRates.busy ? 'Kur yükleniyor…' : 'Altın kurunu yenile'}</button></div><p>TL karşılığı 60 saniyede bir yenilenir. Borç altın olarak kalır; kur değişimi ödeme veya yeni borç oluşturmaz. Gram, ayar ve eski/yeni türünü borcuna uygun seç.</p>{goldRates.error && <p role="status" className="text-amber-900">{goldRates.error}</p>}</div>}
+    {goldEnabled && <div className="rounded-xl border border-[#d8c5ae] bg-[#fffaf3] p-4 text-sm space-y-2"><div className="flex flex-wrap items-center justify-between gap-3"><strong>Döviz ve altın · Harem satış kuru</strong><button className={button} disabled={goldRates.busy} onClick={goldRates.refresh}>{goldRates.busy ? 'Kur yükleniyor…' : 'Kurları yenile'}</button></div><p>TL karşılığı 60 saniyede bir yenilenir. Borç altın olarak kalır; kur değişimi ödeme veya yeni borç oluşturmaz. Gram, ayar ve eski/yeni türünü borcuna uygun seç.</p>{goldRates.error && <p role="status" className="text-amber-900">{goldRates.error}</p>}</div>}
     {error && <p role="alert" className="rounded-xl border border-red-300 bg-red-50 p-4 text-red-800">{error}</p>}
     {notice && <p role="status" className="rounded-xl border border-green-300 bg-green-50 p-4 text-green-900">{notice}</p>}
+    {!listBusy && <LedgerTotalSummary accounts={accounts} rates={goldRates} truncated={truncated} />}
+    <h3 className="font-bold">Listelenen carilerin para birimine göre dağılımı</h3>
     <div className="flex flex-wrap gap-4">{Object.entries(totals).map(([currency, total]) => <div key={currency} className="rounded-xl border border-[#d8c5ae] bg-white p-4 flex flex-wrap gap-8"><div><p className="text-sm">Bilinen borç bakiyesi</p><strong className="text-lg text-[#8c4228]">{money(total.debt.toString(), currency)}</strong><GoldEquivalent minor={total.debt.toString()} currency={currency} rates={goldRates} /></div><div><p className="text-sm">Bilinen alacak bakiyesi</p><strong className="text-lg text-[#22634d]">{money(total.receivable.toString(), currency)}</strong><GoldEquivalent minor={total.receivable.toString()} currency={currency} rates={goldRates} /></div></div>)}</div>
     {visible.some(a => a.balance_minor === null) && <p className="text-sm text-amber-900">{visible.filter(a => a.balance_minor === null).length} carinin bakiyesi bekleniyor; bu hesaplar borç/alacak toplamına dahil değil.</p>}
     <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
