@@ -87,6 +87,26 @@ export function parseHaremGoldRateEvent(payload, { now = Date.now() } = {}) {
   return { rates, rate_times: rateTimes };
 }
 
+export function parseHaremLedgerRateEvent(payload, { now = Date.now() } = {}) {
+  if (!payload?.data || typeof payload.data !== 'object' || Array.isArray(payload.data)) invalid();
+  let parsed = { rates: {}, rate_times: {} };
+  try { parsed = parseHaremGoldRateEvent(payload, { now }); } catch { /* FX quotes remain usable independently of gold. */ }
+  for (const currency of ['USD', 'EUR']) {
+    try {
+      const code = `${currency}TRY`, quote = payload.data[code];
+      if (!quote || quote.code !== code) continue;
+      const buying = rateNumber(quote.alis), selling = rateNumber(quote.satis);
+      if (buying > selling) continue;
+      const timestamp = parseTimestamp(quote.tarih, Number(now));
+      if (Number(now) - timestamp > 5 * 60 * 1000) continue;
+      parsed.rates[currency] = selling;
+      parsed.rate_times[currency] = new Date(timestamp).toISOString();
+    } catch { /* Missing/stale currencies must stay visibly unvalued. */ }
+  }
+  if (!Object.keys(parsed.rates).length) invalid('NO_FRESH_LEDGER_QUOTES');
+  return parsed;
+}
+
 function receiveHaremQuote({ WebSocketImpl, now, timeoutMs, parseQuote, rateType }) {
   return new Promise((resolve, reject) => {
     let socket;
@@ -199,3 +219,4 @@ export function createHaremExchangeRateService({ WebSocketImpl = globalThis.WebS
 
 export const haremExchangeRateService = createHaremExchangeRateService();
 export const haremGoldRateService = createHaremExchangeRateService({ parseQuote: parseHaremGoldRateEvent, rateType: 'Selling', maxAgeMs: 5 * 60 * 1000 });
+export const haremLedgerRateService = createHaremExchangeRateService({ parseQuote: parseHaremLedgerRateEvent, rateType: 'Selling', maxAgeMs: 5 * 60 * 1000 });
