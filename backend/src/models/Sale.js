@@ -16,6 +16,9 @@ const saleItemSchema = new mongoose.Schema({
 
 
 const saleSchema = new mongoose.Schema({
+    test_archive_batch: { type: String },
+    test_archive_at: { type: Date },
+    test_archive_by: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     production_guard: { type: Number, default: 0 },
     client_request_id: { type: String, unique: true, sparse: true },
     measurement_status: { type: String, enum: ["preliminary", "scheduled", "confirmed"], default: "preliminary" },
@@ -89,6 +92,14 @@ const saleSchema = new mongoose.Schema({
     sold_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }
 }, { timestamps: true });
 
+// Archive is a reversible visibility operation. Never change payments, stock,
+// status, report timestamps or current-account entries when archiving a trial.
+export function withArchivedSales(query) { query._includeArchivedSales = true; return query; }
+export function hideArchivedSales() {
+    if (this._includeArchivedSales !== true) this.where({ test_archive_batch: { $exists: false } });
+}
+saleSchema.pre(['find', 'findOne', 'countDocuments', 'distinct', 'updateOne', 'updateMany', 'findOneAndUpdate', 'deleteOne', 'deleteMany', 'findOneAndDelete'], hideArchivedSales);
+saleSchema.pre('aggregate', function () { this.pipeline().unshift({ $match: { test_archive_batch: { $exists: false } } }); });
 const Sale = mongoose.model("Sale", saleSchema);
 
 export default Sale;
