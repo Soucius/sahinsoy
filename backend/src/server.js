@@ -17,6 +17,7 @@ import productionRoutes from "./routes/production.route.js";
 import whatsappRoutes, { whatsappWebhookRouter } from "./routes/whatsapp.route.js";
 import { startWhatsAppWorker } from "./libs/whatsappService.js";
 import accountingRoutes from "./routes/accounting.route.js";
+import { startInvoiceAutoWorker } from "./libs/invoiceAutoLedger.js";
 
 const app = express();
 const PORT = ENV.PORT || 3000;
@@ -46,6 +47,7 @@ app.use("/api/accounting", accountingRoutes);
 
 connectDB().then(async () => {
     await startWhatsAppWorker();
+    await startInvoiceAutoWorker();
     app.listen(PORT, () => {
         console.log(`Server started on: http://localhost:${PORT}`);
     });
