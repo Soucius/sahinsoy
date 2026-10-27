@@ -1,9 +1,12 @@
 import express from 'express';
+import { getVisitPlan, saveVisitPlan } from '../libs/visitPlanning.js';
 import { productionAuth, productionAdminOnly } from '../middlewares/production.middleware.js';
 import { staffLogin, productionMe, getStaff, createStaff, updateStaff, getCandidates, getProductionOrders, createProductionOrder, refreshProductionOrder, updateProductionJob, updateWhatsAppConsent } from '../controllers/production.controller.js';
 const router = express.Router();
 router.post('/staff/login', staffLogin);
 router.use(productionAuth);
+router.get('/visits', getVisitPlan);
+router.post('/visits/:saleId', productionAdminOnly, saveVisitPlan);
 router.get('/me', productionMe);
 router.get('/staff', productionAdminOnly, getStaff);
 router.post('/staff', productionAdminOnly, createStaff);
