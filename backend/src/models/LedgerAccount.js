@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { GOLD_UNITS } from '../libs/goldUnits.js';
 
 const entry = new mongoose.Schema({
   operation_id: { type: String, required: true }, fingerprint: { type: String, required: true },
@@ -11,7 +12,7 @@ const entry = new mongoose.Schema({
 const schema = new mongoose.Schema({
   name: { type: String, required: true, maxlength: 120 }, name_key: { type: String, required: true },
   category: { type: String, enum: ['supplier', 'cargo', 'electricity', 'communication', 'personal', 'other'], required: true }, note: { type: String, maxlength: 500, default: '' },
-  currency: { type: String, enum: ['TRY', 'EUR', 'USD'], required: true }, opening_status: { type: String, enum: ['pending', 'confirmed'], required: true }, opening_date: { type: String, default: null },
+  currency: { type: String, enum: ['TRY', 'EUR', 'USD', ...Object.keys(GOLD_UNITS)], required: true }, opening_status: { type: String, enum: ['pending', 'confirmed'], required: true }, opening_date: { type: String, default: null },
   balance_minor: { type: String, default: null, match: /^-?\d+$/ }, revision: { type: Number, required: true, default: 0 },
   create_operation: { type: String, required: true, unique: true }, create_fingerprint: { type: String, required: true },
   created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
