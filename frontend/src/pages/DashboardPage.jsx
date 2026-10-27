@@ -11,6 +11,7 @@ import {
 import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "../libs/axios";
+import VisitPlanner from '../components/VisitPlanner';
 
 const DashboardPage = () => {
   const [stats, setStats] = useState({
@@ -57,6 +58,7 @@ const DashboardPage = () => {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
+      <VisitPlanner admin />
       <div>
         <h1 className="text-2xl font-bold text-gray-800">
           Sisteme Hoş Geldiniz
