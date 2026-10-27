@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
+import { GOLD_UNITS, goldQuantityValid, isGoldUnit } from './goldUnits.js';
 
 export class LedgerInputError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
 }
-export const LEDGER_METHODS = ['Nakit', 'Havale / EFT', 'Mail Order', 'Kredi Kartı', 'Diğer'];
-export const LEDGER_CURRENCIES = ['TRY', 'EUR', 'USD'];
+export const LEDGER_METHODS = ['Nakit', 'Havale / EFT', 'Mail Order', 'Kredi Kartı', 'Diğer', 'Altın teslimi'];
+export const LEDGER_CURRENCIES = ['TRY', 'EUR', 'USD', ...Object.keys(GOLD_UNITS)];
 export const LEDGER_CATEGORIES = ['supplier', 'cargo', 'electricity', 'communication', 'personal', 'other'];
 export const LEDGER_ENTRY_LIMIT = 5000;
 const uuid = value => typeof value === 'string' && /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(value);
@@ -33,6 +34,9 @@ export function ledgerMinor(value, allowZero = false) {
   return minor.toString();
 }
 function operationId(value) { if (!uuid(value)) throw new LedgerInputError('Kayıt kimliği geçersiz. Ekranı yenileyin.'); return value.toLowerCase(); }
+function assertGoldQuantity(currency, minor) {
+  if (!goldQuantityValid(currency, minor)) throw new LedgerInputError('Adetle tutulan altın için tam adet girin. Gram altın için en fazla iki ondalık kullanın.');
+}
 function revision(account, expected) {
   if (!Number.isSafeInteger(expected) || expected < 0) throw new LedgerInputError('Kayıt sürümü geçersiz. Cariyi yenileyin.');
   if (expected !== account.revision) throw new LedgerInputError('Bu cari başka bir ekranda değişti. Yenileyip tekrar inceleyin.', 409);
@@ -63,6 +67,7 @@ export function newLedgerAccount(input, actor, now = new Date()) {
   }
   if (!['owe', 'receivable'].includes(input.opening_direction)) throw new LedgerInputError('Açılış bakiyesinin borç yönünü seçin.');
   const normalized = { name, category, currency: input.currency, opening_date: ledgerDate(input.opening_date, now), amount_minor: ledgerMinor(input.opening_amount, true), direction: input.opening_direction, description };
+  assertGoldQuantity(input.currency, normalized.amount_minor);
   const fingerprint = hash(normalized);
   const delta = (BigInt(normalized.amount_minor) * (normalized.direction === 'owe' ? 1n : -1n)).toString();
   return { name, name_key: ledgerNameKey(name), category, note: description, currency: normalized.currency, opening_status: 'confirmed', opening_date: normalized.opening_date, balance_minor: delta, revision: 0, create_operation: operation, create_fingerprint: fingerprint, created_by: String(actor._id), entries: [recorded({ operation_id: operation, fingerprint, type: 'opening', date: normalized.opening_date, amount_minor: normalized.amount_minor, delta_minor: delta, description: normalized.description, method: '', reverses: '' }, actor, now)] };
@@ -71,6 +76,7 @@ export function confirmLedgerOpening(account, input, actor, now = new Date()) {
   object(input, ['operation_id', 'expected_revision', 'opening_date', 'opening_amount', 'opening_direction', 'description']);
   if (!['owe', 'receivable'].includes(input.opening_direction)) throw new LedgerInputError('Açılış bakiyesinin borç yönünü seçin.');
   const data = { date: ledgerDate(input.opening_date, now), amount_minor: ledgerMinor(input.opening_amount, true), direction: input.opening_direction, description: text(input.description ?? '', 500, 'Açıklama') };
+  assertGoldQuantity(account.currency, data.amount_minor);
   const operation = operationId(input.operation_id), fingerprint = hash(data), prior = priorOperation(account, operation, fingerprint);
   if (prior) return prior;
   if (account.opening_status !== 'pending' || account.entries.length) throw new LedgerInputError('Bu carinin açılış bakiyesi zaten girilmiş.', 409);
@@ -85,8 +91,10 @@ export function ledgerMovement(account, input, actor, now = new Date()) {
   const date = ledgerDate(input.date, now);
   if (date < account.opening_date) throw new LedgerInputError('Açılış tarihinden önce hareket eklenemez. O tarihteki net bakiyeyi kullanın.');
   const amount = ledgerMinor(input.amount), description = text(input.description ?? '', 500, 'Açıklama', true);
+  assertGoldQuantity(account.currency, amount);
   const payment = input.type.startsWith('payment_');
   const method = input.method ?? '';
+  if ((method === 'Altın teslimi' && !isGoldUnit(account.currency)) || (method === 'Mail Order' && isGoldUnit(account.currency))) throw new LedgerInputError('Altın hesabının ödeme yöntemini kontrol edin.');
   if ((payment && !LEDGER_METHODS.includes(method)) || (!payment && method !== '')) throw new LedgerInputError('Ödeme yöntemini kontrol edin.');
   const data = { type: input.type, date, amount_minor: amount, description, method };
   const operation = operationId(input.operation_id), fingerprint = hash(data), prior = priorOperation(account, operation, fingerprint);
