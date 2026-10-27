@@ -1,11 +1,12 @@
 import express from 'express';
-import { getGoldRates } from '../controllers/goldRate.controller.js';
+import { getGoldRates, getLedgerValuationRates } from '../controllers/goldRate.controller.js';
 import { productionAuth, productionAdminOnly } from '../middlewares/production.middleware.js';
 import { getAccountingConnection, checkAccountingConnection, getInboxInvoices } from '../controllers/accounting.controller.js';
 import { getLedgerAccounts, getLedgerAccount, createLedgerAccount, addLedgerMovement, reverseLedgerEntry, setLedgerOpening } from '../controllers/accountLedger.controller.js';
 const router = express.Router();
 router.use(productionAuth, productionAdminOnly);
 router.get('/gold-rates', getGoldRates);
+router.get('/valuation-rates', getLedgerValuationRates);
 router.get('/connection', getAccountingConnection);
 router.post('/connection/test', checkAccountingConnection);
 router.get('/invoices', getInboxInvoices);
