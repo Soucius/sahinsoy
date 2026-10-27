@@ -3,10 +3,11 @@ import { GOLD_UNITS } from '../libs/goldUnits.js';
 
 const entry = new mongoose.Schema({
   operation_id: { type: String, required: true }, fingerprint: { type: String, required: true },
-  type: { type: String, enum: ['opening', 'debt', 'receivable', 'payment_sent', 'payment_received', 'mail_order', 'reversal'], required: true },
+  type: { type: String, enum: ['opening', 'debt', 'receivable', 'payment_sent', 'payment_received', 'mail_order', 'invoice', 'reversal'], required: true },
   date: { type: String, required: true }, amount_minor: { type: String, required: true, match: /^\d+$/ }, delta_minor: { type: String, required: true, match: /^-?\d+$/ },
   description: { type: String, maxlength: 500, default: '' }, method: { type: String, default: '' }, reverses: { type: String, default: '' },
   source_sale_id: { type: String, default: '', match: /^(?:[a-f\d]{24})?$/i }, source_payment_id: { type: String, default: '', maxlength: 100 },
+  source_invoice_id: { type: String, default: '', maxlength: 36 }, source_invoice_number: { type: String, default: '', maxlength: 100 },
   recorded_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, recorded_name: String, recorded_at: { type: Date, required: true },
 }, { _id: false });
 const schema = new mongoose.Schema({
