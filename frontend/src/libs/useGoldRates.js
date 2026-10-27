@@ -13,10 +13,10 @@ export default function useGoldRates(enabled) {
       pending = true;
       setState(previous => ({ ...previous, busy: true }));
       try {
-        const response = await api.get('/accounting/gold-rates', { signal: controller.signal, timeout: 12000 });
+        const response = await api.get('/accounting/valuation-rates', { signal: controller.signal, timeout: 12000 });
         if (active) setState({ data: response.data, error: '', busy: false });
       } catch (error) {
-        if (active) setState({ data: null, error: error.response?.data?.message || 'Altın kuru alınamadı. Yeniden deneyin.', busy: false });
+        if (active) setState({ data: null, error: error.response?.data?.message || 'Döviz / altın kuru alınamadı. Yeniden deneyin.', busy: false });
       } finally { pending = false; }
     }
     load();
