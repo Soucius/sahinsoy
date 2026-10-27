@@ -2,8 +2,12 @@ import express from "express";
 import { createSale, getAllSales, updateSale, cancelSale, deliverSale, planSaleMeasurement, reviseSaleMeasurements } from "../controllers/sale.controller.js";
 import { addSalePayment, voidSalePayment } from "../controllers/salePayment.controller.js";
 import protect from "../middlewares/auth.middleware.js";
+import { testSaleArchiveHandlers } from '../libs/testSaleArchive.js';
 
 const router = express.Router();
+router.get('/test-archive', protect, testSaleArchiveHandlers.list);
+router.post('/test-archive', protect, testSaleArchiveHandlers.archive);
+router.post('/test-archive/restore', protect, testSaleArchiveHandlers.restore);
 
 router.get("/", protect, getAllSales);
 router.post("/", protect, createSale);
