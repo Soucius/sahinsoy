@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { productionApi } from '../libs/productionApi';
+import VisitPlanner from '../components/VisitPlanner';
 import { DUTIES, staffLoginKey } from '../../../backend/src/libs/productionAccess.js';
 const SUPPLY = { awaiting_order: 'Ürün siparişi verilecek', ordered: 'Ürün siparişi verildi', in_transit: 'Kargoda', received: 'Ürün mağazaya geldi' };
 const STAGES = { waiting: 'Üretim bekliyor', cutting: 'Kesimde', cut: 'Kesildi', sewing: 'Dikim sırasında', sewn: 'Dikildi', ready: 'Teslime / montaja hazır', installation: 'Montajda', installed: 'Montaj tamamlandı' };
@@ -95,6 +96,7 @@ export default function ProductionPage({ admin = false }) {
   const saveStaff = form => mutate(async () => { if (editing._id) await client.patch(`/staff/${editing._id}`, form); else await client.post('/staff', form); setEditing(null); }, 'Personel izinleri kaydedildi.');
   return <main className={admin ? 'space-y-5' : 'max-w-6xl mx-auto p-4 sm:p-7 space-y-5'}>
     <header className="flex flex-wrap gap-4 justify-between items-center"><div><p className="text-sm uppercase tracking-widest text-[#967353]">Şahinsoy · Üretim</p><h1 className="text-3xl font-bold mt-2">{admin ? 'Üretim ve tedarik takibi' : `Merhaba${actor ? `, ${actor.name}` : ''}`}</h1><p className="mt-2 text-[#78634f]">{admin ? 'Ürünlerin gelişinden kesim, dikim ve montaja kadar tüm işler.' : 'Yalnız sana atanan işler. Aşamayı tamamladığında aşağıdaki düğmeyle kaydet.'}</p></div><div className="flex gap-3"><button className={button} onClick={load} disabled={busy}>Yenile</button>{!admin && <button className={button} onClick={() => { localStorage.removeItem('production_token'); navigate('/uretim/giris', { replace: true }); }}>Çıkış yap</button>}</div></header>
+    {(admin || actor?.duties?.includes('installation')) && <VisitPlanner admin={admin} />}
     {error && <p role="alert" className="border border-red-300 bg-red-50 rounded-xl p-4">{error}</p>}
     {loading ? <p>Üretim işleri yükleniyor…</p> : error ? null : <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{[['Tedarikte', activeJobs.filter(j => j.supply !== 'received').length], ['Üretimde', activeJobs.filter(j => ['cutting', 'cut', 'sewing'].includes(j.stage)).length], ['Hazır', activeJobs.filter(j => ['sewn', 'ready'].includes(j.stage)).length], ['Montajda', activeJobs.filter(j => j.stage === 'installation').length]].map(([label, count]) => <div key={label} className="rounded-2xl border bg-[#eee1d0] p-4"><p>{label}</p><strong className="text-3xl block mt-1">{count}</strong></div>)}</div>
