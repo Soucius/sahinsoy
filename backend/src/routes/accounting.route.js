@@ -1,10 +1,14 @@
 import express from 'express';
+import { getInvoiceAutoStatus, configureInvoiceAuto, checkInvoiceAutoNow } from '../libs/invoiceAutoLedger.js';
 import { getGoldRates, getLedgerValuationRates } from '../controllers/goldRate.controller.js';
 import { productionAuth, productionAdminOnly } from '../middlewares/production.middleware.js';
 import { getAccountingConnection, checkAccountingConnection, getInboxInvoices } from '../controllers/accounting.controller.js';
 import { getLedgerAccounts, getLedgerAccount, createLedgerAccount, addLedgerMovement, reverseLedgerEntry, setLedgerOpening } from '../controllers/accountLedger.controller.js';
 const router = express.Router();
 router.use(productionAuth, productionAdminOnly);
+router.get('/invoice-auto', getInvoiceAutoStatus);
+router.post('/invoice-auto', configureInvoiceAuto);
+router.post('/invoice-auto/check', checkInvoiceAutoNow);
 router.get('/gold-rates', getGoldRates);
 router.get('/valuation-rates', getLedgerValuationRates);
 router.get('/connection', getAccountingConnection);
