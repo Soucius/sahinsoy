@@ -1,4 +1,5 @@
 import { InvoiceConnectionError, uyumsoftConfig, publicInvoiceConnection, testInvoiceConnection, listInboxInvoices } from '../libs/uyumsoftInvoices.js';
+import { annotateInvoicePostings } from '../libs/invoiceAutoLedger.js';
 
 const activeReads = new Set();
 async function read(req, res, action) {
@@ -13,4 +14,4 @@ async function read(req, res, action) {
 }
 export function getAccountingConnection(_req, res) { res.set('Cache-Control', 'no-store'); return res.json(publicInvoiceConnection(uyumsoftConfig())); }
 export function checkAccountingConnection(req, res) { return read(req, res, () => testInvoiceConnection()); }
-export function getInboxInvoices(req, res) { return read(req, res, () => listInboxInvoices(req.query)); }
+export function getInboxInvoices(req, res) { return read(req, res, async () => annotateInvoicePostings(await listInboxInvoices(req.query))); }
