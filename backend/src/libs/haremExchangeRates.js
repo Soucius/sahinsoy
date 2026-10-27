@@ -1,3 +1,4 @@
+import { GOLD_UNITS } from './goldUnits.js';
 const HAREM_SOCKET_URL = "wss://hrmsocketonly.haremaltin.com/socket.io/?EIO=4&transport=websocket";
 const CACHE_TTL_MS = 30 * 1000;
 const TIMEOUT_MS = 8000;
@@ -67,7 +68,26 @@ export function parseHaremRateEvent(payload, { now = Date.now() } = {}) {
   };
 }
 
-function receiveHaremQuote({ WebSocketImpl, now, timeoutMs }) {
+export function parseHaremGoldRateEvent(payload, { now = Date.now() } = {}) {
+  if (!payload?.data || typeof payload.data !== 'object' || Array.isArray(payload.data)) invalid();
+  const rates = {}, rateTimes = {};
+  for (const [unit, { provider_code: code }] of Object.entries(GOLD_UNITS)) {
+    try {
+      const quote = payload.data[code];
+      if (!quote || quote.code !== code) continue;
+      const buying = rateNumber(quote.alis), selling = rateNumber(quote.satis);
+      if (buying > selling) continue;
+      const timestamp = parseTimestamp(quote.tarih, Number(now));
+      if (Number(now) - timestamp > 5 * 60 * 1000) continue;
+      rates[unit] = selling;
+      rateTimes[unit] = new Date(timestamp).toISOString();
+    } catch { /* An invalid/missing product must never borrow another gold quote. */ }
+  }
+  if (!Object.keys(rates).length) invalid('NO_FRESH_GOLD_QUOTES');
+  return { rates, rate_times: rateTimes };
+}
+
+function receiveHaremQuote({ WebSocketImpl, now, timeoutMs, parseQuote, rateType }) {
   return new Promise((resolve, reject) => {
     let socket;
     let settled = false;
@@ -124,9 +144,9 @@ function receiveHaremQuote({ WebSocketImpl, now, timeoutMs }) {
           const event = JSON.parse(data.slice(2));
           if (!Array.isArray(event) || event.length !== 2 || typeof event[0] !== "string") invalid("INVALID_HAREM_PROTOCOL");
           if (event[0] !== "price_changed") return;
-          const parsed = parseHaremRateEvent(event[1], { now: now() });
+          const parsed = parseQuote(event[1], { now: now() });
           finish(null, {
-            source: "Harem", rate_type: "Buying", ...parsed,
+            source: "Harem", rate_type: rateType, ...parsed,
             fetched_at: new Date(now()).toISOString(), cached: false, stale: false,
           });
           return;
@@ -151,7 +171,7 @@ function receiveHaremQuote({ WebSocketImpl, now, timeoutMs }) {
   });
 }
 
-export function createHaremExchangeRateService({ WebSocketImpl = globalThis.WebSocket, now = () => Date.now(), timeoutMs = TIMEOUT_MS } = {}) {
+export function createHaremExchangeRateService({ WebSocketImpl = globalThis.WebSocket, now = () => Date.now(), timeoutMs = TIMEOUT_MS, parseQuote = parseHaremRateEvent, rateType = 'Buying', maxAgeMs = MAX_RATE_AGE_MS } = {}) {
   let cache;
   let pending;
   return {
@@ -159,13 +179,16 @@ export function createHaremExchangeRateService({ WebSocketImpl = globalThis.WebS
       const age = Number(now()) - cache?.storedAt;
       if (cache && age >= 0 && age < CACHE_TTL_MS) {
         try {
-          for (const timestamp of Object.values(cache.value.rate_times)) assertFreshTimestamp(Date.parse(timestamp), Number(now()));
+          for (const timestamp of Object.values(cache.value.rate_times)) {
+            assertFreshTimestamp(Date.parse(timestamp), Number(now()));
+            if (Number(now()) - Date.parse(timestamp) > maxAgeMs) invalid('OUTDATED_HAREM_QUOTE');
+          }
           return { ...structuredClone(cache.value), cached: true };
         } catch {
           cache = undefined;
         }
       }
-      if (!pending) pending = receiveHaremQuote({ WebSocketImpl, now, timeoutMs }).then((value) => {
+      if (!pending) pending = receiveHaremQuote({ WebSocketImpl, now, timeoutMs, parseQuote, rateType }).then((value) => {
         cache = { value, storedAt: Number(now()) };
         return value;
       }).finally(() => { pending = undefined; });
@@ -175,3 +198,4 @@ export function createHaremExchangeRateService({ WebSocketImpl = globalThis.WebS
 }
 
 export const haremExchangeRateService = createHaremExchangeRateService();
+export const haremGoldRateService = createHaremExchangeRateService({ parseQuote: parseHaremGoldRateEvent, rateType: 'Selling', maxAgeMs: 5 * 60 * 1000 });
