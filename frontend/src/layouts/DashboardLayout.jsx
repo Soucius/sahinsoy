@@ -72,6 +72,7 @@ const DashboardLayout = () => {
     { title: "WhatsApp Bildirimleri", path: "/dashboard/whatsapp", icon: <MonitorPlay size={20} />, allowed: isProductionAdmin(currentUser) },
     { title: "Faturalar ve Cari", path: "/dashboard/accounting", icon: <FileText size={20} />, allowed: isProductionAdmin(currentUser) },
     { title: 'Kasa ve Personel', path: '/dashboard/cash-office', icon: <FileText size={20} />, allowed: isProductionAdmin(currentUser) },
+    { title: 'Sipariş Kâr / Maliyet', path: '/dashboard/order-profit', icon: <FileText size={20} />, allowed: isProductionAdmin(currentUser) },
     {
       title: "Genel Bakış",
       path: "/dashboard",
