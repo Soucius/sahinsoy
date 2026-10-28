@@ -37,6 +37,7 @@ function JobCard({ job, order, admin, staff, busy, change }) {
   const s = job.snapshot;
   return <section className="border border-[#deceb9] rounded-2xl p-4 sm:p-5 bg-[#fffcf6]">
     <div className="flex flex-wrap gap-3 items-start justify-between"><div><h3 className="font-bold text-xl">{s.product_name}</h3><p className="mt-1 text-[#78634f]">{[s.brand_name, s.room_name, s.area, s.facade, s.window_name].filter(Boolean).join(' · ')}</p><p className="font-semibold mt-2">Renk / VR: {s.variant || 'Belirtilmedi'}</p></div><span className="rounded-full bg-[#eee1d0] px-4 py-2 font-bold">{stageLabel(job)}</span></div>
+    <>{job.warnings?.length > 0 && <ul className="list-disc pl-5 my-3 space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950">{job.warnings.map((warning, index) => <li key={`${warning.code}-${index}`} className="ml-4 font-semibold">{warning.label}</li>)}</ul>}</>
     <details className="mt-3"><summary className="cursor-pointer py-2 font-semibold">Ölçüleri ve ürün bilgilerini göster</summary><JobDetails job={job} /></details>
     {admin && <div className="mt-4 grid sm:grid-cols-2 xl:grid-cols-4 gap-3">
       <label className="font-semibold">Tedarik durumu<select className={`${field} mt-2`} disabled={disabled} value={job.supply} onChange={e => change({ supply: e.target.value })}>{Object.entries(SUPPLY).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
