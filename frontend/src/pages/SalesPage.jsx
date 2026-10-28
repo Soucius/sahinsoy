@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import {paymentSummary} from '../../../backend/src/libs/orderPayments.js';
 import {hasManufacturingItems,openCurtainPrint} from '../libs/curtainPrint';
 import TestSaleArchive from '../components/TestSaleArchive';
+import OrderAttentionPanel from '../components/OrderAttentionPanel';
 const money=x=>Number(x||0).toLocaleString('tr-TR',{style:'currency',currency:'TRY'});
 const statuses={beklemede:'Beklemede',tamamlandi:'Sipariş onaylandı',teslim_edildi:'Teslim Edilen İşler',kaybedildi:'Kaybedilen teklifler',iptal:'İptal Edilenler',payment_pending:'Ödeme Bekleyenler'};
 const isApprovedWork=sale=>sale.status==='tamamlandi'||sale.status==='teslim_edildi';
@@ -90,6 +91,7 @@ export default function SalesPage(){
   };
   return <div className="space-y-5">
     <div><h1 className="text-3xl font-bold">Teklif ve sipariş takibi</h1><p className="mt-2 text-gray-600">Teklifleri, onaylanan siparişleri ve teslim edilen işleri ayrı sekmelerden izleyin.</p></div>
+    <OrderAttentionPanel />
     <TestSaleArchive target={archiveTarget} onClose={()=>setArchiveTarget(null)} onChanged={load} onAvailability={setArchiveEnabled}/>
     <section className="bg-white rounded-2xl p-5 border"><label className="flex gap-3 items-center mb-4">Rapor ayı<input aria-label="Rapor ayı" type="month" value={month} onChange={e=>setMonth(e.target.value)} className="border rounded-lg px-3"/></label><div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{[['Teklif / sipariş toplamı',money(total)],['Onaylanan iş tutarı',money(won)],['Dönüş oranı',`${monthly.length?Math.round(approved.length/monthly.length*100):0}%`],['Teklif / sipariş sayısı',String(monthly.length)]].map(([label,value])=><div key={label}><p className="text-sm text-gray-600">{label}</p><strong className="text-xl">{value}</strong></div>)}</div></section>
     <div className="flex flex-wrap gap-3">{Object.entries(statuses).map(([id,label])=><button key={id} onClick={()=>setTab(id)} className={`px-5 rounded-xl border font-semibold ${tab===id?'bg-indigo-600 text-white':'bg-white'}`}>{label} ({sales.filter(x=>matchesTab(x,id)).length})</button>)}</div>
