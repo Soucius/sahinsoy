@@ -9,6 +9,7 @@ import { STAFF_PRESETS, DUTIES, cleanStaffName, staffLoginKey, staffNamePattern 
 import { ProductionError, productionLines, fingerprint, visibleOrder, applyJobChange, stageChoices, notificationDraft } from '../libs/productionWorkflow.js';
 import { enqueueReadyNotification, kickWhatsAppQueue } from '../libs/whatsappService.js';
 import { whatsappPhone } from '../libs/whatsappNotifications.js';
+import { captureSewingWork } from '../libs/cashPersonnel.js';
 const populate = query => query.populate({ path: 'sale_items.product', select: 'product_name product_category product_brand', populate: [{ path: 'product_category', select: 'category_name' }, { path: 'product_brand', select: 'brand_name' }] });
 const saleFields = 'sale_items pos_details customer_name customer_phone delivery_date delivery_method status measurement_revision measurement_status production_guard';
 const id = value => { if (typeof value !== 'string' || !/^[a-f\d]{24}$/i.test(value)) throw new ProductionError('Kayıt numarası geçersiz.'); return value; };
@@ -183,6 +184,7 @@ export async function updateProductionJob(req, res) {
       const jobs = record.jobs.map(j => j.line_id === job.line_id ? { ...j, ...patch } : j);
       const updated = await ProductionOrder.findOneAndUpdate({ _id: record._id, revision: req.body.expected_revision }, { $set: { jobs }, $inc: { revision: 1 }, $push: { history: audit(req.productionActor, 'İş güncellendi', job.line_id, before, patch) } }, { new: true, session, runValidators: true }).lean();
       if (!updated) throw new ProductionError('Başka biri bu kaydı değiştirdi. Yenileyin.', 409);
+      await captureSewingWork(record, sale, job, jobs.find(line => line.line_id === job.line_id), req.productionActor, session);
       await enqueueReadyNotification(record, updated, sale, session);
       return present(updated, sale, req.productionActor);
     });
