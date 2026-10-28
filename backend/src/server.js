@@ -20,6 +20,8 @@ import accountingRoutes from "./routes/accounting.route.js";
 import { startInvoiceAutoWorker } from "./libs/invoiceAutoLedger.js";
 import { cashPersonnelRouter, startCashOffice } from './libs/cashPersonnel.js';
 
+import { orderProfitRouter } from './libs/orderProfit.js';
+
 const app = express();
 const PORT = ENV.PORT || 3000;
 
@@ -46,6 +48,7 @@ app.use("/api/exchange-rates", exchangeRateRoutes);
 app.use("/api/mail-order-companies", mailOrderCompanyRoutes);
 app.use("/api/accounting", accountingRoutes);
 app.use('/api/cash-office', cashPersonnelRouter);
+app.use('/api/order-profit', orderProfitRouter);
 
 connectDB().then(async () => {
     await startCashOffice();
