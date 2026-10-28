@@ -10,7 +10,7 @@ import { ProductionError, productionLines, fingerprint, visibleOrder, applyJobCh
 import { enqueueReadyNotification, kickWhatsAppQueue } from '../libs/whatsappService.js';
 import { whatsappPhone } from '../libs/whatsappNotifications.js';
 import { captureSewingWork } from '../libs/cashPersonnel.js';
-const populate = query => query.populate({ path: 'sale_items.product', select: 'product_name product_category product_brand', populate: [{ path: 'product_category', select: 'category_name' }, { path: 'product_brand', select: 'brand_name' }] });
+const populate = query => query.populate({ path: 'sale_items.product', select: 'product_name product_category product_brand product_color variants', populate: [{ path: 'product_category', select: 'category_name' }, { path: 'product_brand', select: 'brand_name' }] });
 const saleFields = 'sale_items pos_details customer_name customer_phone delivery_date delivery_method status measurement_revision measurement_status production_guard';
 const id = value => { if (typeof value !== 'string' || !/^[a-f\d]{24}$/i.test(value)) throw new ProductionError('Kayıt numarası geçersiz.'); return value; };
 const bodyKeys = (body, allowed) => { if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(k => !allowed.includes(k))) throw new ProductionError('Gönderilen alanları kontrol edin.'); };
