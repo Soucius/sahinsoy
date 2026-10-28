@@ -18,6 +18,7 @@ import whatsappRoutes, { whatsappWebhookRouter } from "./routes/whatsapp.route.j
 import { startWhatsAppWorker } from "./libs/whatsappService.js";
 import accountingRoutes from "./routes/accounting.route.js";
 import { startInvoiceAutoWorker } from "./libs/invoiceAutoLedger.js";
+import { cashPersonnelRouter, startCashOffice } from './libs/cashPersonnel.js';
 
 const app = express();
 const PORT = ENV.PORT || 3000;
@@ -44,8 +45,10 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/exchange-rates", exchangeRateRoutes);
 app.use("/api/mail-order-companies", mailOrderCompanyRoutes);
 app.use("/api/accounting", accountingRoutes);
+app.use('/api/cash-office', cashPersonnelRouter);
 
 connectDB().then(async () => {
+    await startCashOffice();
     await startWhatsAppWorker();
     await startInvoiceAutoWorker();
     app.listen(PORT, () => {
