@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readyMessage } from './whatsappNotifications.js';
+import { lineAttention } from './orderAttentionRules.js';
 export const SUPPLY = { awaiting_order: 'Ürün siparişi verilecek', ordered: 'Ürün siparişi verildi', in_transit: 'Kargoda', received: 'Ürün mağazaya geldi' };
 export const STAGES = { waiting: 'Üretim bekliyor', cutting: 'Kesimde', cut: 'Kesildi', sewing: 'Dikim sırasında', sewn: 'Dikildi', ready: 'Teslime / montaja hazır', installation: 'Montajda', installed: 'Montaj tamamlandı' };
 export class ProductionError extends Error { constructor(message, status = 400) { super(message); this.status = status; } }
@@ -45,13 +46,14 @@ export function visibleOrder(record, sale, actor) {
   const jobs = admin ? record.jobs : record.jobs.filter(job => assigned(job, actor));
   if (!jobs.length && !admin) return null;
   const allowedIds = new Set(jobs.map(j => j.line_id));
+  const needsRefresh = record.source_fingerprint !== fingerprint(sale);
   return {
     _id: String(record._id), sale_id: String(sale._id), customer_name: sale.customer_name,
     delivery_date: sale.delivery_date, delivery_method: sale.delivery_method,
     sale_status: sale.status, measurement_status: sale.measurement_status,
-    revision: record.revision, needs_refresh: record.source_fingerprint !== fingerprint(sale),
+    revision: record.revision, needs_refresh: needsRefresh,
     closed: sale.status !== 'tamamlandi',
-    jobs: jobs.map(job => ({ line_id: job.line_id, snapshot: job.snapshot, supply: job.supply, stage: job.stage, cutting: job.cutting, sewing: job.sewing, installation: job.installation, note: job.note, tracking: admin ? job.tracking : undefined })),
+    jobs: jobs.map(job => ({ warnings: ['beklemede', 'tamamlandi'].includes(sale.status) ? [...(sale.measurement_status !== 'confirmed' ? [{ kind: 'measurement', code: 'measurement_pending', label: 'Kesin ölçü bekleniyor.' }] : []), ...lineAttention(sale, sale.sale_items.find(item => String(item._id) === job.line_id) || {}, sale.sale_items.findIndex(item => String(item._id) === job.line_id), job, !needsRefresh)] : [], line_id: job.line_id, snapshot: job.snapshot, supply: job.supply, stage: job.stage, cutting: job.cutting, sewing: job.sewing, installation: job.installation, note: job.note, tracking: admin ? job.tracking : undefined })),
     history: (record.history || []).filter(event => admin || allowedIds.has(event.line_id)).map(event => ({ at: event.at, actor_name: event.actor_name, line_id: event.line_id, action: event.action,
       // Assignment IDs, carrier references and previous snapshots belong to admin only.
       before: admin ? event.before : fields(event.before, ['stage', 'supply', 'note']),
