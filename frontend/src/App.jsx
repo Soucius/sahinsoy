@@ -21,6 +21,7 @@ import ProductionSigninPage from "./pages/ProductionSigninPage";
 import WhatsAppTestPage from "./pages/WhatsAppTestPage";
 import AccountingPage from "./pages/AccountingPage";
 import CashPersonnelPage from './pages/CashPersonnelPage';
+import OrderProfitPage from './pages/OrderProfitPage';
 
 function App() {
   return (
@@ -48,6 +49,8 @@ function App() {
             <Route path="whatsapp" element={<WhatsAppTestPage />} />
             <Route path="accounting" element={<AccountingPage />} />
             <Route path="cash-office" element={<CashPersonnelPage />} />
+            <Route path="order-profit" element={<OrderProfitPage />} />
+            <Route path="order-profit/:id" element={<OrderProfitPage />} />
             <Route path="sales/:id/payments" element={<SalePaymentsPage />} />
             <Route path="sales/:id/measurements" element={<SaleMeasurementPage />} />
           </Route>
