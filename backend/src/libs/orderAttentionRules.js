@@ -7,7 +7,7 @@ export function lineAttention(sale, item, index, job, fresh = true) {
   const warnings = [], cart = sale.pos_details?.cart?.[index];
   const line = cart && pid(cart.product_id) === pid(item.product) ? cart : null;
   const product = item.product && typeof item.product === 'object' ? item.product : {};
-  const name = text(line?.product_name) || product.product_name || 'Ürün', room = text(item.room_name), prefix = [name, room].filter(Boolean).join(' · ');
+  const name = text(line?.product_name) || product.product_name || 'Ürün', room = text(item.room_name), prefix = [name, room, Number(item.width) > 0 ? `${item.width}${Number(item.height) > 0 ? ` × ${item.height}` : ''} cm` : ''].filter(Boolean).join(' · ');
   const add = (kind, code, label) => warnings.push({ kind, code, line_id: pid(item), label: `${prefix}: ${label}` });
   const category = normalized(line?.category_name || product.product_category?.category_name);
   const motor = line?.motor_system?.role === 'motor' || /motor|kumanda/.test(category);
