@@ -19,7 +19,7 @@ export default function VisitPlanner({ admin = false }) {
     try { const response = await client.get('/visits'); if (id === request.current) { setResult(response.data); setError(''); setForbidden(false); } }
     catch (e) { if (id === request.current) { setError(e.response?.data?.message || 'Günlük plan yüklenemedi. Görünen liste eski olabilir.'); if (e.response?.status === 403) setForbidden(true); } }
   }, [client]);
-  useEffect(() => { load(); const timer = setInterval(load, 60000); const current = request; return () => { current.current++; clearInterval(timer); }; }, [load]);
+  useEffect(() => { load(); const timer = setInterval(load, 60000); const current = request; window.addEventListener('sahinsoy-visits-changed', load); return () => { current.current++; clearInterval(timer); window.removeEventListener('sahinsoy-visits-changed', load); }; }, [load]);
   const cards = result?.cards || [], currentDay = result?.today || today();
   const active = cards.filter(card => !card.completed);
   const selectedDay = cards.filter(card => (showCompleted || !card.completed) && card.date === day);
@@ -31,7 +31,7 @@ export default function VisitPlanner({ admin = false }) {
     saving.current = true; setBusy(true); setNotice('');
     try {
       await client.post(`/visits/${editing.sale_id}`, form);
-      setEditing(null); setForm(null); setNotice('Termin ve sorumlu kaydedildi.'); await load();
+      setEditing(null); setForm(null); setNotice('Termin ve sorumlu kaydedildi.'); window.dispatchEvent(new Event('sahinsoy-visits-changed')); await load();
     } catch (e) { setNotice(e.response?.data?.message || 'Kayıt yanıtı alınamadı. Planı yenileyip kontrol et; aynı isteği tekrar kaydetmek ikinci randevu oluşturmaz.'); if (e.response?.status === 409) await load(); }
     finally { saving.current = false; setBusy(false); }
   }
