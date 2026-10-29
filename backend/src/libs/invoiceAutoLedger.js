@@ -16,6 +16,7 @@ const aliases = [
   [['DMR', 'DMR Line'], 'DEMİR DMR TEKSTİL SANAYİ VE TİCARET LİMİTED ŞİRKETİ'],
   [['Lilium', 'Ustaoğlu'], 'USTAOĞLU TEKSTİL SAN.VE TİC.LTD.ŞTİ.'],
   [['Sebahattin Akyıldız', 'Vicenta Home'], 'SEBAHATTİN AKYILDIZ TEKSTİL KONFEKSİYON GIDA MOBİLYA TURİZM İNŞAAT TAAHHÜT NAKLİYAT İTHALAT İHRACAT SANAYİ VE TİCARET LİMİTED ŞİRKETİ'],
+  [['Usta Perde', 'Teleda', 'Teleda Tekstil', 'Usta Perde (Teleda)', 'Usta Perde (Teleda Tekstil)'], 'USTA PERDE SİSTEMLERİ SANAYİ VE TİCARET LTD.ŞTİ'],
   [['Storlife'], 'STORLİFE PERDE SİSTEMLERİ SAN.VE TİC. LTD. ŞTİ.'],
   [['Yurtiçi Kargo'], 'Yurtiçi Kargo Servisi A.Ş.'],
   [['CK Boğaziçi Elektrik'], 'CK BOĞAZİÇİ ELEKTRİK PERAKENDE SATIŞ ANONİM ŞİRKETİ'],
