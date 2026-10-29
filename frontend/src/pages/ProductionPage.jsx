@@ -76,7 +76,7 @@ export default function ProductionPage({ admin = false }) {
       if (!admin && e.response?.status === 401) { localStorage.removeItem('production_token'); navigate('/uretim/giris', { replace: true }); }
     } finally { setLoading(false); }
   }
-  useEffect(() => { let stopped = false; const get = () => { if (!stopped) load(); }; get(); const timer = setInterval(get, 60000); return () => { stopped = true; clearInterval(timer); }; // Refresh permissions and assigned work without changing an open form.
+  useEffect(() => { let stopped = false; const get = () => { if (!stopped) load(); }; get(); const timer = setInterval(get, 60000); window.addEventListener('sahinsoy-visits-changed', get); return () => { stopped = true; clearInterval(timer); window.removeEventListener('sahinsoy-visits-changed', get); }; // Refresh permissions and assigned work without changing an open form.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
   async function mutate(operation, success) {
