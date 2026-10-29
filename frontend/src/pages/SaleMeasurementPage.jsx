@@ -175,7 +175,7 @@ function RevisionHistory({
   return <div className="space-y-3">{[...history].reverse().map((entry, index) => <details key={`${entry.revision}-${index}`} className="rounded-xl border border-[#decdb7] bg-[#fffdf8] p-4">
     <summary className="cursor-pointer font-semibold">Revizyon {entry.revision} · {entry.kind === 'plan' ? 'Ölçü randevusu' : 'Ölçü teyidi'} · {dateTime(entry.changed_at)}</summary>
     <div className="mt-4 space-y-3 text-[#593d29]">
-      <p>Kaydı yapan: {actorLabel(entry.changed_by)} · Usta: {entry.after?.measurement_master || 'Belirtilmedi'}</p>
+      <p>Kaydı yapan: {entry.changed_name || actorLabel(entry.changed_by)} · Usta: {entry.after?.measurement_master || 'Belirtilmedi'}</p>
       <p>{measurementSourceLabel(entry.before?.measurement_source)} → {measurementSourceLabel(entry.after?.measurement_source)}</p>
       <p>Ölçü tarihi: {date(entry.after?.measurement_date)} · Durum: {statusLabel(entry.after?.measurement_status)}</p>
       {entry.after?.measurement_note && <p className="whitespace-pre-wrap">Not: {entry.after.measurement_note}</p>}
