@@ -32,8 +32,11 @@ const saleSchema = new mongoose.Schema({
             kind: { type: String, enum: ["plan", "measurement"], required: true },
             revision: { type: Number, required: true, min: 1 },
             request_id: { type: String, default: "" },
+            request_fingerprint: { type: String, default: "" },
             changed_at: { type: Date, required: true },
-            changed_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+            changed_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null, required: function () { return !this.changed_by_staff; } },
+            changed_by_staff: { type: mongoose.Schema.Types.ObjectId, ref: "ProductionStaff", default: null },
+            changed_name: { type: String, default: "", maxlength: 120 },
             before: { type: mongoose.Schema.Types.Mixed, required: true },
             after: { type: mongoose.Schema.Types.Mixed, required: true }
         }, { _id: false })],
