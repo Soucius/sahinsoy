@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { productionApi } from '../libs/productionApi';
+import StaffMeasurementEditor from './StaffMeasurementEditor';
 
 const kinds = { measurement: 'Ölçü', installation: 'Montaj', store: 'Mağaza teslimi' };
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Istanbul' }).format(new Date());
@@ -13,6 +14,7 @@ export default function VisitPlanner({ admin = false }) {
   const [result, setResult] = useState(null), [day, setDay] = useState(today), [filter, setFilter] = useState('all'), [search, setSearch] = useState(''), [showCompleted, setShowCompleted] = useState(false);
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [editing, setEditing] = useState(null), [form, setForm] = useState(null), [forbidden, setForbidden] = useState(false);
   const saving = useRef(false), request = useRef(0), formRef = useRef(null);
+  const [measurementTarget, setMeasurementTarget] = useState(null);
   useEffect(() => { if (editing) formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, [editing]);
   const load = useCallback(async () => {
     const id = ++request.current;
@@ -24,7 +26,7 @@ export default function VisitPlanner({ admin = false }) {
   const active = cards.filter(card => !card.completed);
   const selectedDay = cards.filter(card => (showCompleted || !card.completed) && card.date === day);
   const query = search.trim().toLocaleLowerCase('tr-TR');
-  const matches = cards.filter(card => (showCompleted || !card.completed) && (!query || `${card.customer_name} ${card.sale_id} ${card.assigned_name}`.toLocaleLowerCase('tr-TR').includes(query)) && (filter === 'overdue' ? card.date && card.date < currentDay && !card.completed : filter === 'undated' ? !card.date && !card.completed : card.date === day && (filter === 'all' || card.kind === filter)));
+  const matches = cards.filter(card => (filter === 'measured' || showCompleted || !card.completed) && (!query || `${card.customer_name} ${card.sale_id} ${card.assigned_name}`.toLocaleLowerCase('tr-TR').includes(query)) && (filter === 'measured' ? card.kind === 'measurement' && card.completed : filter === 'overdue' ? card.date && card.date < currentDay && !card.completed : filter === 'undated' ? !card.date && !card.completed : card.date === day && (filter === 'all' || card.kind === filter)));
   function edit(card) { setEditing(card); setForm({ request_id: crypto.randomUUID(), kind: card.kind, date: card.date || day, assigned_to: card.assigned_to || '', note: card.note, expected_revision: card.revision, expected_date: card.date, expected_measurement_revision: card.measurement_revision }); setNotice(''); }
   async function save(event) {
     event.preventDefault(); if (!editing || saving.current) return;
@@ -46,9 +48,9 @@ export default function VisitPlanner({ admin = false }) {
         {Object.entries(kinds).filter(([kind]) => admin || kind !== 'store').map(([kind, label]) => <button key={kind} className={`${button} text-left ${filter === kind ? 'ring-2 ring-[#80512f]' : ''}`} onClick={() => setFilter(kind)}><span className="block">{label} · {dateLabel(day)}</span><strong className="block text-3xl mt-2">{selectedDay.filter(card => card.kind === kind).length}</strong></button>)}
         <button className={`${button} text-left bg-red-50 ${filter === 'overdue' ? 'ring-2 ring-red-700' : ''}`} onClick={() => setFilter('overdue')}><span className="block">Geciken işler · Bugüne göre</span><strong className="block text-3xl mt-2 text-red-800">{active.filter(card => card.date && card.date < currentDay).length}</strong></button>
       </div>
-      <div className="flex flex-wrap gap-3 items-end"><label className="grid gap-2 text-sm">Plan tarihi<input type="date" className={field} value={day} required onChange={event => { if (event.target.value) { setDay(event.target.value); setFilter('all'); } }} /></label><button className={button} onClick={() => { setDay(currentDay); setFilter('all'); }}>Bugün</button><button className={button} onClick={() => { setDay(shiftDay(currentDay, 1)); setFilter('all'); }}>Yarın</button><button className={button} onClick={() => setFilter('all')}>Günün tüm işleri</button><button className={button} onClick={() => setFilter('undated')}>Tarihi belirlenmeyenler ({active.filter(card => !card.date).length})</button></div>
+      <div className="flex flex-wrap gap-3 items-end"><label className="grid gap-2 text-sm">Plan tarihi<input type="date" className={field} value={day} required onChange={event => { if (event.target.value) { setDay(event.target.value); setFilter('all'); } }} /></label><button className={button} onClick={() => { setDay(currentDay); setFilter('all'); }}>Bugün</button><button className={button} onClick={() => { setDay(shiftDay(currentDay, 1)); setFilter('all'); }}>Yarın</button><button className={button} onClick={() => setFilter('all')}>Günün tüm işleri</button><button className={button} onClick={() => setFilter('undated')}>Tarihi belirlenmeyenler ({active.filter(card => !card.date).length})</button>{!admin && <button className={button} onClick={() => setFilter('measured')}>Aldığım ölçüler / Düzelt ({cards.filter(card => card.kind === 'measurement' && card.completed).length})</button>}</div>
       <div className="flex flex-wrap gap-4 items-center"><label className="grow min-w-52">Müşteri / sipariş / sorumlu ara<input className={`${field} mt-2`} value={search} onChange={event => setSearch(event.target.value)} /></label><label className="flex items-center gap-2 min-h-11"><input type="checkbox" checked={showCompleted} onChange={event => setShowCompleted(event.target.checked)} />Tamamlanan ölçü / montajları da göster</label></div>
-      <p className="text-sm font-semibold">{filter === 'overdue' ? `Geciken açık işler · ${dateLabel(currentDay)} öncesi` : filter === 'undated' ? 'Tarihi belirlenmeyen açık işler' : `${dateLabel(day)} · ${filter === 'all' ? 'Tüm işler' : kinds[filter]}`} · {matches.length} kayıt</p>
+      <p className="text-sm font-semibold">{filter === 'measured' ? 'Aldığım ölçüler · Düzeltilebilir açık işler' : filter === 'overdue' ? `Geciken açık işler · ${dateLabel(currentDay)} öncesi` : filter === 'undated' ? 'Tarihi belirlenmeyen açık işler' : `${dateLabel(day)} · ${filter === 'all' ? 'Tüm işler' : kinds[filter]}`} · {matches.length} kayıt</p>
       {!matches.length && <p className="rounded-xl border border-dashed p-5">Bu seçimde {admin ? 'planlanmış iş' : 'sana atanmış ziyaret'} yok.</p>}
       <div className="grid gap-4 xl:grid-cols-2">{matches.map(card => <article key={card.key} className="rounded-2xl border border-[#d8c5ae] bg-white p-4 space-y-3">
         <div className="flex flex-wrap justify-between gap-3"><strong className={`rounded-lg px-3 py-2 ${card.kind === 'measurement' ? 'bg-blue-50 text-blue-900' : card.kind === 'installation' ? 'bg-amber-50 text-amber-900' : 'bg-green-50 text-green-900'}`}>{kinds[card.kind]}</strong><span className="font-semibold">{dateLabel(card.date)}{!card.completed && card.date && card.date < currentDay ? ' · Gecikmiş' : ''}{card.completed ? card.kind === 'installation' ? ' · Montaj tamamlandı' : ' · Ölçü teyit edildi' : ''}</span></div>
@@ -59,6 +61,7 @@ export default function VisitPlanner({ admin = false }) {
         {!card.explicit_plan && <p className="text-xs text-[#78634f]">{card.kind === 'measurement' ? 'Siparişteki ölçü tarihinden gösteriliyor.' : 'Siparişteki teslim tarihinden gösteriliyor; sorumlu ve iş notunu planlayabilirsin.'}</p>}
         {card.changed_elsewhere && <p className="text-sm text-amber-900">Tarih sipariş/ölçü ekranından değişti; güncel tarih gösteriliyor.</p>}
         {card.warnings.length > 0 && <ul className="list-disc pl-5 text-sm text-amber-900 space-y-1">{card.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>}
+        {!admin && card.kind === 'measurement' && <button className={`${button} bg-[#80512f] text-white`} disabled={busy || !!error} onClick={() => setMeasurementTarget(card.sale_id)}>{card.completed ? 'Ölçüyü düzelt' : 'Ölçüyü aldım / Ölçüleri gir'}</button>}
         {admin && <div className="flex flex-wrap gap-3"><button className={button} disabled={busy || !!error} onClick={() => edit(card)}>Termini / sorumluyu düzenle</button><Link className={button} to={`/dashboard/sales/${card.sale_id}/${card.kind === 'measurement' ? 'measurements' : 'payments'}`}>{card.kind === 'measurement' ? 'Ölçü bilgileri' : 'Sipariş / tahsilatlar'}</Link></div>}
         {admin && card.history?.length > 0 && <details><summary className="cursor-pointer underline text-sm">Termin değişiklik geçmişi</summary><div className="mt-2 space-y-2 text-sm">{[...card.history].reverse().map((event, index) => <p key={index}>{new Date(event.at).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })} · {event.name} · {dateLabel(event.before?.date)} → {dateLabel(event.after?.date)}</p>)}</div></details>}
       </article>)}</div>
@@ -71,5 +74,6 @@ export default function VisitPlanner({ admin = false }) {
         <div className="flex gap-3"><button className={`${button} bg-[#754b2e] text-white`} disabled={busy}>{busy ? 'Kaydediliyor…' : 'Termini kaydet'}</button><button type="button" className={button} disabled={busy} onClick={() => { setForm(null); setEditing(null); }}>Vazgeç</button></div>
       </form></section>}
     </>}
+    {!admin && measurementTarget && <StaffMeasurementEditor saleId={measurementTarget} client={client} onClose={() => setMeasurementTarget(null)} onSaved={() => { setMeasurementTarget(null); setFilter('measured'); setNotice('Ölçü alındı ve sipariş otomatik güncellendi. Aldığım ölçüler / Düzelt bölümünden yeniden açabilirsin.'); window.dispatchEvent(new Event('sahinsoy-visits-changed')); }} />}
   </section>;
 }
