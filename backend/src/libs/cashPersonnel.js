@@ -3,12 +3,14 @@ import express from 'express';
 import protect from '../middlewares/auth.middleware.js';
 import Sale, { withArchivedSales } from '../models/Sale.js';
 import Staff from '../models/ProductionStaff.js';
+import { testArchiveEnabled } from './testSaleArchive.js';
+import { currentCashEntries, currentCashRows, makeCashResetHandlers } from './cashTestReset.js';
 import { isProductionAdmin } from './productionAccess.js';
 import { ledgerMinor, ledgerNameKey, LedgerInputError } from './accountLedger.js';
 import { OfficeError, officeToday, officeHash, officeId, officeObject, officeOperation, officeDate, officeText, personInput, sewingMeter, priceSewing, officeEntry, officeReverse, paymentKey, cashReceipts, officeSummary } from './cashPersonnelRules.js';
 
 const oid = mongoose.Schema.Types.ObjectId, mixed = mongoose.Schema.Types.Mixed;
-const officeSchema = new mongoose.Schema({ _id: String, operation: String, fingerprint: String, start_date: String, activated_at: Date, openings: { cash: { type: String, default: null }, bank: { type: String, default: null }, pos: { type: String, default: '0' } }, excluded_payment_keys: [String], revision: { type: Number, default: 0 }, created_by: oid, opening_history: [mixed] });
+const officeSchema = new mongoose.Schema({ _id: String, operation: String, fingerprint: String, start_date: String, activated_at: Date, openings: { cash: { type: String, default: null }, bank: { type: String, default: null }, pos: { type: String, default: '0' } }, excluded_payment_keys: [String], revision: { type: Number, default: 0 }, created_by: oid, opening_history: [mixed], test_cash_reset: { type: mixed, default: null }, test_cash_resets: [mixed] });
 const personSchema = new mongoose.Schema({ operation: { type: String, unique: true }, fingerprint: String, name: String, name_key: { type: String, unique: true }, kind: { type: String, enum: ['salary', 'piece'] }, staff_id: { type: oid, default: null }, monthly_minor: { type: String, default: null }, rates: [{ _id: false, key: String, minor: String }], revision: { type: Number, default: 0 }, history: [mixed] }, { timestamps: true });
 personSchema.index({ staff_id: 1 }, { unique: true, partialFilterExpression: { staff_id: { $type: 'objectId' } } });
 const eventSchema = new mongoose.Schema({ operation: { type: String, required: true, unique: true }, fingerprint: String, request_fingerprint: String, source_key: { type: String }, date: String, type: String, description: String, cash: { cash: { type: String, default: '0' }, bank: { type: String, default: '0' }, pos: { type: String, default: '0' } }, person: { type: oid, default: null }, person_delta_minor: { type: String, default: '0' }, amount_minor: String, payment_kind: String, period: String, reverses: String, reversed_type: String, sewing: mixed, recorded_by: oid, recorded_name: String }, { timestamps: true });
@@ -68,12 +70,12 @@ cashPersonnelRouter.get('/', async (req, res) => {
     const entries = await OfficeEntry.find().sort({ createdAt: -1 }).limit(10001).lean();
     const sales = await Sale.find({ 'payments.paid_date': { $gte: config.start_date } }).select('customer_name payments').limit(2001).lean();
     const receipts = cashReceipts(sales.slice(0, 2000), config), pending = await SewingWork.find({ journal: null }).sort({ createdAt: -1 }).limit(501).lean();
-    const summary = officeSummary(entries, receipts, config, people), incomplete = sales.length > 2000 || entries.length > 10000;
+    const summary = officeSummary(currentCashEntries(entries, config), receipts, config, people), incomplete = sales.length > 2000 || entries.length > 10000;
     if (incomplete) for (const account of Object.values(summary.accounts)) account.balance_minor = null;
-    const all = [...entries, ...receipts].sort((a, b) => b.date.localeCompare(a.date) || String(b._id).localeCompare(String(a._id))), dailyRows = all.filter(row => row.date === selectedDate);
+    const all = [...entries, ...receipts].sort((a, b) => b.date.localeCompare(a.date) || String(b._id).localeCompare(String(a._id))), dailyRows = [...currentCashRows(entries, config), ...receipts].sort((a, b) => b.date.localeCompare(a.date) || String(b._id).localeCompare(String(a._id))).filter(row => row.date === selectedDate);
     let incoming = 0n, outgoing = 0n;
     for (const row of dailyRows) { const delta = Object.values(row.cash).reduce((sum, value) => sum + BigInt(value), 0n); if (delta > 0n) incoming += delta; else outgoing -= delta; }
-    res.json({ configured: true, today: officeToday(), config: { start_date: config.start_date, openings: config.openings }, people, staff, summary, entries: all.slice(0, 500), day_entries: dailyRows.slice(0, 500), daily: incomplete ? null : { incoming_minor: String(incoming), outgoing_minor: String(outgoing), net_minor: String(incoming - outgoing) }, list_truncated: all.length > 500 || dailyRows.length > 500, incomplete, pending: pending.slice(0, 500), pending_truncated: pending.length > 500 });
+    res.json({ configured: true, today: officeToday(), config: { start_date: config.start_date, openings: config.openings, revision: config.revision, test_reset_enabled: testArchiveEnabled(), test_cash_reset: config.test_cash_reset ? { id: config.test_cash_reset.id, at: config.test_cash_reset.at } : null }, people, staff, summary, entries: all.slice(0, 500), day_entries: dailyRows.slice(0, 500), daily: incomplete ? null : { incoming_minor: String(incoming), outgoing_minor: String(outgoing), net_minor: String(incoming - outgoing) }, list_truncated: all.length > 500 || dailyRows.length > 500, incomplete, pending: pending.slice(0, 500), pending_truncated: pending.length > 500 });
   } catch (error) { fail(res, error); }
 });
 cashPersonnelRouter.post('/setup', async (req, res) => {
@@ -128,3 +130,7 @@ cashPersonnelRouter.post('/entries/:id/reverse', async (req, res) => {
   } catch (error) { fail(res, error); }
 });
 cashPersonnelRouter.post('/reconcile', async (req, res) => { try { officeObject(req.body, []); await inTransaction(async session => { await lockOffice(session); const people = await PayPerson.find({ kind: 'piece' }).session(session).lean(); for (const person of people) await pricePending(person, req.user, session); }); res.json({ saved: true }); } catch (error) { fail(res, error); } });
+
+const cashResetHandlers = makeCashResetHandlers({ office: CashOffice, entries: OfficeEntry, sales: Sale, include: withArchivedSales, transaction: inTransaction, enabled: testArchiveEnabled });
+cashPersonnelRouter.post('/test-reset', cashResetHandlers.reset);
+cashPersonnelRouter.post('/test-reset/restore', cashResetHandlers.restore);
