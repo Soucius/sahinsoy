@@ -123,11 +123,11 @@ async function reviseStockDeductions(sale,newItems,session){
   sale.stock_deductions=[...ledger].filter(([,quantity])=>quantity>0).map(([product,quantity])=>({product,quantity}));
 }
 
-function recordMeasurement(sale,input,kind,userId,before){
+function recordMeasurement(sale,input,kind,userId,before,staffId=null,actorName=''){
   for(const key of ['measurement_source','measurement_date','measurement_master','measurement_note'])if(input[key]!==undefined)sale[key]=input[key];
   sale.measurement_status=kind==='measurement'?'confirmed':sale.measurement_date?'scheduled':'preliminary';
   sale.measurement_revision=(sale.measurement_revision||0)+1;
-  sale.measurement_history.push({kind,revision:sale.measurement_revision,request_id:input.client_request_id||'',changed_at:new Date(),changed_by:userId,before,after:measurementSnapshot(sale)});
+  sale.measurement_history.push({kind,revision:sale.measurement_revision,request_id:input.client_request_id||'',request_fingerprint:input.request_fingerprint||'',changed_at:new Date(),changed_by:staffId?null:userId,changed_by_staff:staffId,changed_name:actorName,before,after:measurementSnapshot(sale)});
 }
 function failure(error,res){
   if(error instanceof SaleInputError)return res.status(error.status).json({message:error.message});
@@ -247,9 +247,17 @@ export async function reviseSaleMeasurements(req,res){
     await session.withTransaction(async()=>{
       const sale=await Sale.findById(req.params.id).session(session);
       if(!sale)throw new SaleInputError('Sipariş bulunamadı.',404);
+      await applySaleMeasurementRevision(sale,input,{user_id:req.user._id,name:req.user.user_username||''},session);savedId=sale._id;
+    });
+    res.json(await populate(Sale.findById(savedId)));
+  }catch(error){failure(error,res);}finally{await session.endSession();}
+}
+
+// Shared dimension-only transaction logic; staff endpoints must scope the visit before calling.
+export async function applySaleMeasurementRevision(sale,input,actor,session){
       // A successful request stays successful even after a later plan, delivery or cancellation.
       // Replaying it must never recreate stock writes or restore an old geometry snapshot.
-      if(sale.measurement_history.some(entry=>entry.request_id===input.client_request_id)){savedId=sale._id;return;}
+      if(sale.measurement_history.some(entry=>entry.request_id===input.client_request_id)){return false;}
       editableMeasurement(sale,input);
       const before=measurementSnapshot(sale);
       const products=[];
@@ -265,9 +273,6 @@ export async function reviseSaleMeasurements(req,res){
       const data=normalizeSale({...pick(sale.toObject()),...Object.fromEntries(fields.map(key=>[key,revision[key]]))});
       if(sale.status==='tamamlandi')await reviseStockDeductions(sale,data.sale_items,session);
       for(const key of fields)sale[key]=data[key];
-      recordMeasurement(sale,input,'measurement',req.user._id,before);
-      await sale.save({session});savedId=sale._id;
-    });
-    res.json(await populate(Sale.findById(savedId)));
-  }catch(error){failure(error,res);}finally{await session.endSession();}
+      recordMeasurement(sale,input,'measurement',actor.user_id||null,before,actor.staff_id||null,actor.name||'');
+      await sale.save({session});return true;
 }
