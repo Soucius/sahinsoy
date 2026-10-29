@@ -1,3 +1,4 @@
+import { getStaffMeasurement, saveStaffMeasurement } from '../libs/staffMeasurement.js';
 import express from 'express';
 import { getVisitPlan, saveVisitPlan } from '../libs/visitPlanning.js';
 import { getOrderAttention, saveOrderVariant } from '../libs/orderAttention.js';
@@ -7,6 +8,8 @@ const router = express.Router();
 router.post('/staff/login', staffLogin);
 router.use(productionAuth);
 router.get('/visits', getVisitPlan);
+router.get('/visits/:saleId/measurements', getStaffMeasurement);
+router.post('/visits/:saleId/measurements', saveStaffMeasurement);
 router.get('/attention', productionAdminOnly, getOrderAttention);
 router.post('/attention/:saleId/variant', productionAdminOnly, saveOrderVariant);
 router.post('/visits/:saleId', productionAdminOnly, saveVisitPlan);
