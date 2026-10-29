@@ -6,6 +6,7 @@ const aliases = [
   { accounts: ['DMR', 'DMR Line'], title: 'DEMİR DMR TEKSTİL SANAYİ VE TİCARET LİMİTED ŞİRKETİ' },
   { accounts: ['Lilium', 'Ustaoğlu'], title: 'USTAOĞLU TEKSTİL SAN.VE TİC.LTD.ŞTİ.' },
   { accounts: ['Sebahattin Akyıldız', 'Vicenta Home'], title: 'SEBAHATTİN AKYILDIZ TEKSTİL KONFEKSİYON GIDA MOBİLYA TURİZM İNŞAAT TAAHHÜT NAKLİYAT İTHALAT İHRACAT SANAYİ VE TİCARET LİMİTED ŞİRKETİ' },
+  { accounts: ['Usta Perde', 'Teleda', 'Teleda Tekstil', 'Usta Perde (Teleda)', 'Usta Perde (Teleda Tekstil)'], title: 'USTA PERDE SİSTEMLERİ SANAYİ VE TİCARET LTD.ŞTİ' },
   { accounts: ['Storlife'], title: 'STORLİFE PERDE SİSTEMLERİ SAN.VE TİC. LTD. ŞTİ.' },
   { accounts: ['Yurtiçi Kargo'], title: 'Yurtiçi Kargo Servisi A.Ş.' },
   { accounts: ['CK Boğaziçi Elektrik'], title: 'CK BOĞAZİÇİ ELEKTRİK PERAKENDE SATIŞ ANONİM ŞİRKETİ' },
