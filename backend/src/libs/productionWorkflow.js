@@ -52,8 +52,9 @@ export function visibleOrder(record, sale, actor) {
     delivery_date: sale.delivery_date, delivery_method: sale.delivery_method,
     sale_status: sale.status, measurement_status: sale.measurement_status,
     revision: record.revision, needs_refresh: needsRefresh,
+    sewing_default: admin ? String(record.sewing_default || '') || null : undefined,
     closed: sale.status !== 'tamamlandi',
-    jobs: jobs.map(job => ({ warnings: ['beklemede', 'tamamlandi'].includes(sale.status) ? [...(sale.measurement_status !== 'confirmed' ? [{ kind: 'measurement', code: 'measurement_pending', label: 'Kesin ölçü bekleniyor.' }] : []), ...lineAttention(sale, sale.sale_items.find(item => String(item._id) === job.line_id) || {}, sale.sale_items.findIndex(item => String(item._id) === job.line_id), job, !needsRefresh)] : [], line_id: job.line_id, snapshot: job.snapshot, supply: job.supply, stage: job.stage, cutting: job.cutting, sewing: job.sewing, installation: job.installation, note: job.note, tracking: admin ? job.tracking : undefined })),
+    jobs: jobs.map(job => ({ warnings: ['beklemede', 'tamamlandi'].includes(sale.status) ? [...(sale.measurement_status !== 'confirmed' ? [{ kind: 'measurement', code: 'measurement_pending', label: 'Kesin ölçü bekleniyor.' }] : []), ...lineAttention(sale, sale.sale_items.find(item => String(item._id) === job.line_id) || {}, sale.sale_items.findIndex(item => String(item._id) === job.line_id), job, !needsRefresh)] : [], line_id: job.line_id, snapshot: job.snapshot, supply: job.supply, stage: job.stage, cutting: job.cutting, sewing: job.sewing, sewing_override: admin ? Boolean(job.sewing_override) : undefined, installation: job.installation, note: job.note, tracking: admin ? job.tracking : undefined })),
     history: (record.history || []).filter(event => admin || allowedIds.has(event.line_id)).map(event => ({ at: event.at, actor_name: event.actor_name, line_id: event.line_id, action: event.action,
       // Assignment IDs, carrier references and previous snapshots belong to admin only.
       before: admin ? event.before : fields(event.before, ['stage', 'supply', 'note']),
