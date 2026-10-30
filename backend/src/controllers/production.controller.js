@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { assignOrderSewing, refreshSewingJobs, sewingOverride } from '../libs/orderSewing.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import Sale from '../models/Sale.js';
@@ -152,11 +153,8 @@ export async function refreshProductionOrder(req, res) {
       const record = await ProductionOrder.findById(id(req.params.id)).session(session).lean();
       if (!record) throw new ProductionError('Üretim kaydı bulunamadı.', 404);
       const sale = await lockedSale(record.sale, session);
-      const jobs = productionLines(sale).map(line => {
-        const old = record.jobs.find(j => j.line_id === line.line_id);
-        if (!old) return line;
-        return { ...old, snapshot: line.snapshot, stage: JSON.stringify(old.snapshot) === JSON.stringify(line.snapshot) ? old.stage : 'waiting' };
-      });
+      const defaultStaff = record.sewing_default ? await ProductionStaff.findOne({ _id: record.sewing_default, active: true, duties: 'sewing' }).session(session).lean() : null;
+      const jobs = refreshSewingJobs(record, productionLines(sale), Boolean(defaultStaff));
       const updated = await ProductionOrder.findOneAndUpdate({ _id: record._id, revision: req.body.expected_revision }, { $set: { jobs, source_fingerprint: fingerprint(sale) }, $inc: { revision: 1 }, $push: { history: audit(req.productionActor, 'Güncel ölçü ve ürünler alındı; değişen satırlar üretim beklemeye döndü', '', { jobs: record.jobs }, { jobs }) } }, { new: true, session, runValidators: true }).lean();
       if (!updated) throw new ProductionError('Başka biri bu kaydı değiştirdi. Yenileyin.', 409);
       await enqueueReadyNotification(record, updated, sale, session);
@@ -180,6 +178,7 @@ export async function updateProductionJob(req, res) {
         const staff = await ProductionStaff.findOne({ _id: patch[duty], active: true, duties: duty }).session(session).lean();
         if (!staff) throw new ProductionError('Seçilen personelin giriş izni veya bu görev yetkisi yok.', 409);
       }
+      if (Object.hasOwn(patch, 'sewing')) patch.sewing_override = sewingOverride(patch.sewing, record.sewing_default);
       const before = Object.fromEntries(Object.keys(patch).map(k => [k, job[k]]));
       const jobs = record.jobs.map(j => j.line_id === job.line_id ? { ...j, ...patch } : j);
       const updated = await ProductionOrder.findOneAndUpdate({ _id: record._id, revision: req.body.expected_revision }, { $set: { jobs }, $inc: { revision: 1 }, $push: { history: audit(req.productionActor, 'İş güncellendi', job.line_id, before, patch) } }, { new: true, session, runValidators: true }).lean();
@@ -189,6 +188,29 @@ export async function updateProductionJob(req, res) {
       return present(updated, sale, req.productionActor);
     });
     kickWhatsAppQueue();
+    res.json(result);
+  } catch (error) { fail(res, error); }
+}
+export async function updateOrderSewing(req, res) {
+  try {
+    if (req.productionActor.kind !== 'admin') throw new ProductionError('Sipariş terzisini yalnız mağaza yöneticisi seçebilir.', 403);
+    bodyKeys(req.body, ['expected_revision', 'sewing']); revision(req.body);
+    const selected = req.body.sewing === null ? null : id(req.body.sewing);
+    const result = await transaction(async session => {
+      const record = await ProductionOrder.findById(id(req.params.id)).session(session).lean();
+      if (!record) throw new ProductionError('Üretim kaydı bulunamadı.', 404);
+      const sale = await lockedSale(record.sale, session);
+      if (record.source_fingerprint !== fingerprint(sale)) throw new ProductionError('Önce güncel sipariş bilgilerini alıp ürünleri kontrol edin.', 409);
+      if (selected && !await ProductionStaff.findOne({ _id: selected, active: true, duties: 'sewing' }).session(session).lean()) throw new ProductionError('Seçilen personelin giriş izni veya dikim yetkisi yok.', 409);
+      const jobs = assignOrderSewing(record.jobs, selected);
+      const assignments = rows => rows.filter(job => job.snapshot.kind === 'textile').map(job => ({ line_id: job.line_id, sewing: job.sewing || null, sewing_override: Boolean(job.sewing_override) }));
+      const updated = await ProductionOrder.findOneAndUpdate({ _id: record._id, revision: req.body.expected_revision }, {
+        $set: { sewing_default: selected, jobs }, $inc: { revision: 1 },
+        $push: { history: audit(req.productionActor, 'Siparişin dikim sorumlusu seçildi; açık ve ortak terziye bağlı ürünlere uygulandı', '', { sewing: record.sewing_default || null, assignments: assignments(record.jobs) }, { sewing: selected, assignments: assignments(jobs) }) },
+      }, { new: true, session, runValidators: true }).lean();
+      if (!updated) throw new ProductionError('Başka biri bu kaydı değiştirdi. Yenileyin.', 409);
+      return present(updated, sale, req.productionActor);
+    });
     res.json(result);
   } catch (error) { fail(res, error); }
 }
