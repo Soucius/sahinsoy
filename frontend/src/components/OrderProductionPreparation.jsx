@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { productionApi } from '../libs/productionApi';
+import { initialProductionForm } from '../libs/productionPreparationForm';
 
 const SUPPLY = { awaiting_order: 'Sipariş verilecek', ordered: 'Sipariş verildi', in_transit: 'Kargoda', received: 'Mağazada' };
 const DONE = ['sewn', 'ready', 'installation', 'installed'];
@@ -8,18 +9,6 @@ const field = 'w-full rounded-xl border border-[#c8ad8c] bg-white px-3 py-3 disa
 const button = 'rounded-xl border border-[#b99a77] px-4 py-3 font-semibold disabled:opacity-50';
 const primary = `${button} bg-[#80512f] text-white`;
 const key = value => value ? String(value) : null;
-const common = (jobs, duty) => {
-  const values = [...new Set(jobs.map(job => key(job[duty])).filter(Boolean))];
-  return values.length === 1 ? values[0] : '';
-};
-function initialForm(data, previous = {}) {
-  const validPerson = (id, duty) => data.staff.some(person => person._id === id && person.active && person.duties.includes(duty)) ? id : '';
-  return { cutting: validPerson(common(data.jobs, 'cutting') || previous.cutting, 'cutting'),
-    sewing: validPerson(data.order?.sewing_default || common(data.jobs, 'sewing') || previous.sewing, 'sewing'),
-    installation: validPerson(common(data.jobs, 'installation') || previous.installation, 'installation'),
-    materials: Object.fromEntries(data.jobs.map(job => [job.line_id, data.order ? job.supply : previous.materials?.[job.line_id] || job.supply])),
-    confirm_changed_work: false };
-}
 function missingAssignments(data, deliveryMethod) {
   return data.jobs.some(job => job.snapshot.kind === 'textile' && !DONE.includes(job.stage) && (!job.sewing || job.stage === 'waiting' && !job.cutting)
     || ['montaj', 'installation'].includes(deliveryMethod) && !['installation', 'installed'].includes(job.stage) && !job.installation);
@@ -35,7 +24,7 @@ export default function OrderProductionPreparation({ sale, blocked, onBusyChange
 
   function apply(data, preserveDraft = false) {
     setData(data);
-    setForm(previous => initialForm(data, preserveDraft ? previous : undefined));
+    setForm(previous => initialProductionForm(data, preserveDraft ? previous : undefined));
     setEditing(!data.order || data.order.needs_refresh || missingAssignments(data, sale.delivery_method));
     setError('');
   }
@@ -130,7 +119,7 @@ export default function OrderProductionPreparation({ sale, blocked, onBusyChange
       </form> : <div className="mt-4 space-y-3">
         <p className="font-semibold">Sipariş üretim takibinde.</p>
         <div className="space-y-2">{data.jobs.map(job => <p key={job.line_id}><strong>{job.snapshot.product_name}</strong> · {SUPPLY[job.supply]}{job.snapshot.kind === 'textile' ? ` · Kesim: ${personName(job.cutting)} · Dikim: ${personName(job.sewing)}` : ''}{installation ? ` · Montaj: ${personName(job.installation)}` : ''}</p>)}</div>
-        <div className="flex flex-wrap gap-3"><button type="button" className={button} disabled={busy || blocked || unknown} onClick={() => { setForm(initialForm(data)); setEditing(true); setNotice(''); }}>Malzeme / eksik sorumlu düzenle</button><Link className={button} to={`/dashboard/production?order=${sale._id}`}>İşin ilerleyişini gör</Link></div>
+        <div className="flex flex-wrap gap-3"><button type="button" className={button} disabled={busy || blocked || unknown} onClick={() => { setForm(initialProductionForm(data)); setEditing(true); setNotice(''); }}>Malzeme / eksik sorumlu düzenle</button><Link className={button} to={`/dashboard/production?order=${sale._id}`}>İşin ilerleyişini gör</Link></div>
       </div>)}
     </>}
     <div ref={resultRef} tabIndex={-1} className="mt-4" role="status" aria-live="polite">{notice}</div>
