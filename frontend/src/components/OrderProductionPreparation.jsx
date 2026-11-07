@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { productionApi } from '../libs/productionApi';
-import { initialProductionForm } from '../libs/productionPreparationForm';
+import { initialProductionForm, groupProductionMaterials, changeMaterialGroup, materialGroupStatus } from '../libs/productionPreparationForm';
 
 const SUPPLY = { awaiting_order: 'Sipariş verilecek', ordered: 'Sipariş verildi', in_transit: 'Kargoda', received: 'Mağazada' };
 const DONE = ['sewn', 'ready', 'installation', 'installed'];
@@ -92,6 +92,13 @@ export default function OrderProductionPreparation({ sale, blocked, onBusyChange
   const disabled = busy || blocked || unknown || data?.measurement_status !== 'confirmed' || data?.sale_status !== 'tamamlandi';
   const personName = id => data?.staff.find(person => person._id === key(id))?.name || (id ? 'Kayıtlı personel' : 'Atanmadı');
   const options = duty => data.staff.filter(person => person.active && person.duties.includes(duty)).map(person => <option value={person._id} key={person._id}>{person.name}</option>);
+  const materialGroups = groupProductionMaterials(data?.jobs || []);
+  const changeMaterials = (jobs, supply) => change({ materials: changeMaterialGroup(form.materials, jobs, supply) });
+  const materialRow = job => <div className="grid items-center gap-3 border-t border-[#eadfd1] pt-3 sm:grid-cols-[1fr_220px]" key={job.line_id}>
+    <div><p className="text-sm text-[#6f5843]">{[job.snapshot.room_name, job.snapshot.facade, job.snapshot.window_name, job.snapshot.width ? `${job.snapshot.width}${job.snapshot.height ? ` × ${job.snapshot.height}` : ''} cm` : ''].filter(Boolean).join(' · ') || job.snapshot.product_name}</p></div>
+    <label className="sr-only" htmlFor={`material-${job.line_id}`}>{job.snapshot.product_name} {job.snapshot.room_name} {job.snapshot.width} cm malzeme durumu</label>
+    <select id={`material-${job.line_id}`} className={field} disabled={job.stage !== 'waiting'} value={form.materials[job.line_id]} onChange={event => changeMaterials([job], event.target.value)}>{Object.entries(SUPPLY).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>
+  </div>;
 
   return <section className="rounded-2xl border border-[#decdb7] bg-[#fffdf8] p-5 sm:p-6" aria-label="Üretim hazırlığı">
     <h2 className="text-xl font-bold">{data?.order && !data.order.needs_refresh ? 'Üretim takibi' : 'Üretime hazırla'}</h2>
@@ -106,19 +113,34 @@ export default function OrderProductionPreparation({ sale, blocked, onBusyChange
             <label className="grid gap-2 font-semibold">Dikim sorumlusu<select className={field} value={form.sewing} onChange={event => change({ sewing: event.target.value })}><option value="">Terzi seç</option>{options('sewing')}</select></label>
           </>}{installation && <label className="grid gap-2 font-semibold">Montaj sorumlusu<select className={field} value={form.installation} onChange={event => change({ installation: event.target.value })}><option value="">Personel seç</option>{options('installation')}</select></label>}</div>
           {data.order && <p className="text-sm text-[#6f5843]">Bu seçimler sorumlusu olmayan ürünlere uygulanır. Ürüne özel atamalar ve tamamlanmış işler korunur.</p>}
-          <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold">Malzeme durumu</h3><button type="button" className={button} onClick={() => change({ materials: Object.fromEntries(data.jobs.map(job => [job.line_id, 'received'])) })}>Tümü mağazada</button></div>
-          {data.jobs.map(job => <div className="grid items-center gap-3 border-b border-[#eadfd1] pb-3 sm:grid-cols-[1fr_220px]" key={job.line_id}>
-            <div><strong>{job.snapshot.product_name}</strong><p className="mt-1 text-sm text-[#6f5843]">{[job.snapshot.room_name, job.snapshot.facade, job.snapshot.variant].filter(Boolean).join(' · ')}</p></div>
-            <label className="sr-only" htmlFor={`material-${job.line_id}`}>{job.snapshot.product_name} malzeme durumu</label>
-            <select id={`material-${job.line_id}`} className={field} disabled={job.stage !== 'waiting'} value={form.materials[job.line_id]} onChange={event => change({ materials: { ...form.materials, [job.line_id]: event.target.value } })}>{Object.entries(SUPPLY).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>
-          </div>)}
+          <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold">Malzeme durumu</h3>
+            <label className="grid gap-1 text-sm">Tüm ürünlere uygula<select className={field} value="" disabled={!data.jobs.some(job => job.stage === 'waiting')} onChange={event => changeMaterials(data.jobs, event.target.value)}><option value="" disabled>Toplu durum seç</option>{Object.entries(SUPPLY).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+          </div>
+          <p className="text-sm text-[#6f5843]">Aynı ürün, renk / VR ve kasa rengi tek gruptur. Bir seçim grubun tüm ölçülerine uygulanır; üretimi başlayanlar korunur. Seçimler aşağıdan kaydedilir. Bu ekran firmaya sipariş göndermez.</p>
+          {materialGroups.map(group => {
+            const editableJobs = group.jobs.filter(job => job.stage === 'waiting');
+            const status = materialGroupStatus(form.materials, editableJobs.length ? editableJobs : group.jobs);
+            const s = group.snapshot;
+            return <div className="rounded-xl border border-[#eadfd1] p-4 space-y-3" key={group.id}>
+              <div className="grid items-center gap-3 sm:grid-cols-[1fr_220px]">
+                <div><strong>{s.product_name}</strong><p className="mt-1 text-sm text-[#6f5843]">{[s.brand_name, s.variant, s.case_color ? `Kasa: ${s.case_color}` : '', `${group.jobs.length} ürün kalemi`].filter(Boolean).join(' · ')}</p>{group.jobs.length === 1 && <p className="mt-1 text-sm text-[#6f5843]">{[s.room_name, s.facade, s.window_name].filter(Boolean).join(' · ')}</p>}{editableJobs.length < group.jobs.length && <p className="mt-1 text-sm">Üretimi başlayan {group.jobs.length - editableJobs.length} kalemin durumu korunur.</p>}</div>
+                <label className="grid gap-1 text-sm">{group.jobs.length > 1 ? 'Grubun malzeme durumu' : 'Malzeme durumu'}<select className={field} aria-label={`${s.product_name} grup malzeme durumu`} disabled={!editableJobs.length} value={status} onChange={event => changeMaterials(group.jobs, event.target.value)}><option value="" disabled>Farklı durumlar</option>{Object.entries(SUPPLY).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+              </div>
+              {group.jobs.length > 1 && <details><summary className="cursor-pointer text-sm font-semibold">Ölçüleri ayrı düzenle ({group.jobs.length})</summary><div className="mt-3 space-y-3">{group.jobs.map(materialRow)}</div></details>}
+            </div>;
+          })}
           {data.changed_started.length > 0 && <label className="flex items-start gap-3 rounded-xl bg-amber-50 p-4"><input className="mt-1" type="checkbox" checked={form.confirm_changed_work} onChange={event => change({ confirm_changed_work: event.target.checked })} /><span><strong>Başlamış {data.changed_started.length} ürünün ölçüsü / ürünü değişmiş.</strong> {data.changed_started.map(job => job.product_name).join(', ')}. Değişen ürünler üretim beklemeye dönecek; ekiple yeniden kontrol edeceğim.</span></label>}
         </fieldset>
         <button className={primary} disabled={disabled || data.changed_started.length > 0 && !form.confirm_changed_work}>{busy ? 'Kaydediliyor…' : data.order ? 'Üretim hazırlığını kaydet' : 'Üretime gönder'}</button>
         <p className="text-sm text-[#6f5843]">Sorumluların paneline düşer. Kesim / dikim, personel başlattığında ilerler.</p>
       </form> : <div className="mt-4 space-y-3">
         <p className="font-semibold">Sipariş üretim takibinde.</p>
-        <div className="space-y-2">{data.jobs.map(job => <p key={job.line_id}><strong>{job.snapshot.product_name}</strong> · {SUPPLY[job.supply]}{job.snapshot.kind === 'textile' ? ` · Kesim: ${personName(job.cutting)} · Dikim: ${personName(job.sewing)}` : ''}{installation ? ` · Montaj: ${personName(job.installation)}` : ''}</p>)}</div>
+        <div className="space-y-2">{materialGroups.map(group => {
+          const lines = group.jobs.map(job => <p key={job.line_id}><strong>{job.snapshot.product_name}</strong> · {SUPPLY[job.supply]}{job.snapshot.kind === 'textile' ? ` · Kesim: ${personName(job.cutting)} · Dikim: ${personName(job.sewing)}` : ''}{installation ? ` · Montaj: ${personName(job.installation)}` : ''}<span className="block text-sm text-[#6f5843]">{[job.snapshot.room_name, job.snapshot.facade, job.snapshot.window_name, job.snapshot.width ? `${job.snapshot.width}${job.snapshot.height ? ` × ${job.snapshot.height}` : ''} cm` : ''].filter(Boolean).join(' · ')}</span></p>);
+          if (group.jobs.length === 1) return <div key={group.id}>{lines}</div>;
+          const counts = Object.entries(SUPPLY).map(([id, label]) => { const count = group.jobs.filter(job => job.supply === id).length; return count ? `${label}: ${count}` : ''; }).filter(Boolean).join(' · ');
+          return <details key={group.id} className="rounded-xl border border-[#eadfd1] p-4"><summary className="cursor-pointer"><strong>{group.snapshot.product_name}</strong> · {group.jobs.length} ürün kalemi<span className="block mt-1 text-sm">{[group.snapshot.variant, group.snapshot.case_color, counts].filter(Boolean).join(' · ')}</span></summary><div className="mt-3 space-y-3">{lines}</div></details>;
+        })}</div>
         <div className="flex flex-wrap gap-3"><button type="button" className={button} disabled={busy || blocked || unknown} onClick={() => { setForm(initialProductionForm(data)); setEditing(true); setNotice(''); }}>Malzeme / eksik sorumlu düzenle</button><Link className={button} to={`/dashboard/production?order=${sale._id}`}>İşin ilerleyişini gör</Link></div>
       </div>)}
     </>}
