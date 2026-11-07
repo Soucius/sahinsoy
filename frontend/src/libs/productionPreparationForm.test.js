@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initialProductionForm } from './productionPreparationForm.js';
+import { initialProductionForm, groupProductionMaterials, changeMaterialGroup, materialGroupStatus } from './productionPreparationForm.js';
 const staff = [
   { _id: 'nevzat', name: 'Nevzat', active: true, duties: ['cutting', 'installation'] },
   { _id: 'hayati', name: 'Hayati', active: true, duties: ['sewing'] },
@@ -42,4 +42,38 @@ test('a mixture of assigned and unassigned jobs and an empty order both initiali
   assert.equal(initialProductionForm(source, null).cutting, 'nevzat'); assert.equal(initialProductionForm(source, null).sewing, 'hayati');
   source.jobs = [];
   assert.deepEqual(initialProductionForm(source, null), { cutting: '', sewing: '', installation: '', materials: {}, confirm_changed_work: false });
+});
+
+const materialJob = (id, snapshot = {}, stage = 'waiting') => ({ line_id: id, stage, supply: stage === 'waiting' ? 'awaiting_order' : 'received', snapshot: { kind: 'mechanical', brand_name: 'OBA', category_name: 'Plise', product_name: 'LANTANA', variant: '150', case_color: 'Beyaz', ...snapshot } });
+test('six plise measurements across different rooms form one purchase group beside a textile product', () => {
+  const jobs = [materialJob('textile', { kind: 'textile', product_name: 'SULTAN' }), ...Array.from({ length: 6 }, (_, i) => materialJob(String(i), { width: 50 + i, height: 100 + i, room_name: i ? 'Salon' : 'Mutfak' }))];
+  const before = structuredClone(jobs), groups = groupProductionMaterials(jobs);
+  assert.deepEqual(groups.map(group => group.jobs.length), [1, 6]);
+  assert.deepEqual(groups[1].jobs.map(job => job.line_id), ['0', '1', '2', '3', '4', '5']);
+  assert.deepEqual(jobs, before);
+});
+test('different products, brands, fabric variants and case colors stay separate', () => {
+  const jobs = [materialJob('base'), materialJob('color', { variant: '151' }), materialJob('case', { case_color: 'Siyah' }), materialJob('brand', { brand_name: 'Diğer' }), materialJob('product', { product_name: 'VEGA' })];
+  assert.equal(groupProductionMaterials(jobs).length, 5);
+  assert.deepEqual(groupProductionMaterials([]), []);
+});
+test('a group change updates all six waiting rows, preserves a different product and does not mutate the draft', () => {
+  const jobs = Array.from({ length: 6 }, (_, i) => materialJob(String(i)));
+  const materials = { other: 'received', ...Object.fromEntries(jobs.map(job => [job.line_id, job.supply])) };
+  const before = structuredClone(materials), next = changeMaterialGroup(materials, jobs, 'ordered');
+  assert.equal(next.other, 'received'); assert.ok(jobs.every(job => next[job.line_id] === 'ordered')); assert.deepEqual(materials, before);
+});
+test('bulk changes never downgrade started or completed jobs and ignore the empty selector', () => {
+  const jobs = [materialJob('waiting'), materialJob('cutting', {}, 'cutting'), materialJob('ready', {}, 'ready')];
+  const materials = Object.fromEntries(jobs.map(job => [job.line_id, job.supply]));
+  assert.deepEqual(changeMaterialGroup(materials, jobs, 'ordered'), { waiting: 'ordered', cutting: 'received', ready: 'received' });
+  assert.equal(changeMaterialGroup(materials, jobs, ''), materials);
+});
+test('mixed group status becomes uniform after bulk selection and individual exceptions remain visible', () => {
+  const jobs = [materialJob('a'), materialJob('b')], materials = { a: 'ordered', b: 'awaiting_order' };
+  assert.equal(materialGroupStatus(materials, jobs), '');
+  const next = changeMaterialGroup(materials, jobs, 'in_transit');
+  assert.equal(materialGroupStatus(next, jobs), 'in_transit');
+  const exception = changeMaterialGroup(next, [jobs[0]], 'received');
+  assert.equal(materialGroupStatus(exception, jobs), ''); assert.equal(exception.b, 'in_transit');
 });
