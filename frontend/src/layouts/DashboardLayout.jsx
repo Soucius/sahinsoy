@@ -2,15 +2,12 @@ import { useState, useEffect } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
-  MonitorPlay,
   Package,
   FileText,
   LogOut,
   Menu,
   X,
   User,
-  Tag,
-  Ruler,
   Layers,
   Lock,
   Loader2,
@@ -68,56 +65,26 @@ const DashboardLayout = () => {
     restrictedPaths.some((p) => location.pathname.startsWith(p));
 
   const menuItems = [
-    { title: "Üretim ve Tedarik", path: "/dashboard/production", icon: <Layers size={20} />, allowed: isProductionAdmin(currentUser) },
-    { title: "WhatsApp Bildirimleri", path: "/dashboard/whatsapp", icon: <MonitorPlay size={20} />, allowed: isProductionAdmin(currentUser) },
-    { title: "Faturalar ve Cari", path: "/dashboard/accounting", icon: <FileText size={20} />, allowed: isProductionAdmin(currentUser) },
-    { title: 'Kasa ve Personel', path: '/dashboard/cash-office', icon: <FileText size={20} />, allowed: isProductionAdmin(currentUser) },
-    { title: 'Sipariş Kâr / Maliyet', path: '/dashboard/order-profit', icon: <FileText size={20} />, allowed: isProductionAdmin(currentUser) },
-    {
-      title: "Genel Bakış",
-      path: "/dashboard",
-      icon: <LayoutDashboard size={20} />,
-      allowed: true,
-    },
-    {
-      title: "POS Ekranı",
-      path: "/dashboard/pos",
-      icon: <MonitorPlay size={20} />,
-      allowed: true,
-    },
-    {
-      title: "Teklif ve Sipariş Takibi",
-      path: "/dashboard/sales",
-      icon: <FileText size={20} />,
-      allowed: true,
-    },
-    {
-      title: "Ürünler & Stok",
-      path: "/dashboard/products",
-      icon: <Package size={20} />,
-      allowed: isAdmin,
-    },
-    {
-      title: "Kategori Yönetimi",
-      path: "/dashboard/categories",
-      icon: <Layers size={20} />,
-      allowed: isAdmin,
-    },
-    {
-      title: "Marka Yönetimi",
-      path: "/dashboard/brands",
-      icon: <Tag size={20} />,
-      allowed: isAdmin,
-    },
-    {
-      title: "Birim Yönetimi",
-      path: "/dashboard/units",
-      icon: <Ruler size={20} />,
-      allowed: isAdmin,
-    },
+    { title: "Bugün", path: "/dashboard", icon: <LayoutDashboard size={20} />, allowed: true },
+    { title: "Siparişler", path: "/dashboard/sales", icon: <FileText size={20} />, allowed: true },
+    { title: "Üretim", path: "/dashboard/production", icon: <Layers size={20} />, allowed: isProductionAdmin(currentUser) },
+    { title: "Kasa ve cari", path: "/dashboard/accounting", icon: <FileText size={20} />, allowed: isProductionAdmin(currentUser) },
+    { title: "Ürünler", path: "/dashboard/products", icon: <Package size={20} />, allowed: isAdmin },
   ];
-
-  const visibleMenuItems = menuItems.filter((item) => item.allowed);
+  const settingsItems = [
+    { title: "Kâr / maliyet raporu", path: "/dashboard/order-profit", allowed: isProductionAdmin(currentUser) },
+    { title: "Personel giriş izinleri", path: "/dashboard/production?tab=staff", allowed: isProductionAdmin(currentUser) },
+    { title: "WhatsApp bildirimleri", path: "/dashboard/whatsapp", allowed: isProductionAdmin(currentUser) },
+    { title: "Kategoriler", path: "/dashboard/categories", allowed: isAdmin },
+    { title: "Markalar", path: "/dashboard/brands", allowed: isAdmin },
+    { title: "Birimler", path: "/dashboard/units", allowed: isAdmin },
+  ].filter(item => item.allowed);
+  const visibleMenuItems = menuItems.filter(item => item.allowed);
+  const financePage = ['/dashboard/accounting', '/dashboard/cash-office'].some(path => location.pathname.startsWith(path));
+  const active = item => item.path === '/dashboard' ? location.pathname === item.path
+    : item.path === '/dashboard/accounting' ? financePage : location.pathname.startsWith(item.path);
+  const settingsActive = settingsItems.some(item => location.pathname === item.path.split('?')[0] && (item.path.includes('?') ? location.search.includes('tab=staff') : true));
+  const pageTitle = location.pathname === '/dashboard/pos' ? 'Yeni sipariş' : location.pathname.includes('/measurements') ? 'Ölçü ve üretim' : visibleMenuItems.find(active)?.title || 'Şahinsoy';
 
   return (
     <div className="h-screen w-full bg-gray-50 flex overflow-hidden font-sans">
@@ -148,10 +115,9 @@ const DashboardLayout = () => {
         </div>
 
         <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
+          <Link to="/dashboard/pos" onClick={() => setIsSidebarOpen(false)} className="mb-5 flex min-h-12 items-center justify-center rounded-xl bg-[#80512f] px-4 py-3 font-bold text-white">+ Yeni sipariş</Link>
           {visibleMenuItems.map((item) => {
-            const isActive =
-              location.pathname === item.path ||
-              (item.path !== "/dashboard" && location.pathname === item.path);
+            const isActive = active(item);
 
             return (
               <Link
@@ -170,6 +136,10 @@ const DashboardLayout = () => {
               </Link>
             );
           })}
+          {settingsItems.length > 0 && <details key={location.pathname + location.search} open={settingsActive} className="pt-5">
+            <summary className="cursor-pointer px-3 py-3 text-sm font-semibold text-gray-600">Ayarlar ve raporlar</summary>
+            {settingsItems.map(item => <Link key={item.path} to={item.path} onClick={() => setIsSidebarOpen(false)} className="block rounded-lg px-4 py-3 text-sm text-gray-600 hover:bg-gray-50">{item.title}</Link>)}
+          </details>}
         </nav>
 
         <div className="p-4 border-t border-gray-100">
@@ -193,7 +163,7 @@ const DashboardLayout = () => {
             </button>
 
             <h2 className="text-lg font-semibold text-gray-800 hidden sm:block">
-              Şahinsoy POS · Satış ve sipariş ekranı
+              {pageTitle}
             </h2>
           </div>
 
@@ -246,7 +216,12 @@ const DashboardLayout = () => {
               </Link>
             </div>
           ) : (
-            <Outlet context={{ currentUser, setCurrentUser }} />
+            <>
+              {financePage && isProductionAdmin(currentUser) && <nav aria-label="Kasa ve cari bölümleri" className="mb-5 flex flex-wrap gap-3">
+                {[["/dashboard/accounting", "Cari ve faturalar"], ["/dashboard/cash-office", "Kasa ve personel"]].map(([path, title]) => <Link key={path} to={path} className={'rounded-xl border px-5 py-3 font-semibold ' + (location.pathname.startsWith(path) ? 'bg-[#80512f] text-white' : 'bg-white')}>{title}</Link>)}
+              </nav>}
+              <Outlet context={{ currentUser, setCurrentUser }} />
+            </>
           )}
         </div>
       </main>
