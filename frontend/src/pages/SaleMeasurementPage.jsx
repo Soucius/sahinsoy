@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useOutletContext, useParams } from 'react-router-dom';
+import OrderProductionPreparation from '../components/OrderProductionPreparation';
+import { isProductionAdmin } from '../../../backend/src/libs/productionAccess.js';
 import toast from 'react-hot-toast';
 import api from '../libs/axios';
 import { hasManufacturingItems, openCurtainPrint } from '../libs/curtainPrint';
@@ -19,7 +21,7 @@ const revisionOf = sale => Number(sale?.measurement_revision || 0);
 const statusLabel = status => ({
   preliminary: 'Ön ölçü',
   scheduled: 'Ölçü planlandı',
-  confirmed: 'Ölçü teyit edildi'
+  confirmed: 'Ölçü alındı'
 })[status] || 'Ön ölçü';
 const card = 'rounded-2xl border border-[#decdb7] bg-[#fffdf8] p-5 sm:p-6';
 const primary = 'min-h-12 rounded-xl bg-[#80512f] px-5 py-3 font-semibold text-[#fffaf3] disabled:cursor-not-allowed disabled:opacity-50';
@@ -198,6 +200,8 @@ function RevisionHistory({
   </details>)}</div>;
 }
 export default function SaleMeasurementPage() {
+  const { currentUser } = useOutletContext();
+  const [preparing, setPreparing] = useState(false);
   const {
     id
   } = useParams();
@@ -299,7 +303,7 @@ export default function SaleMeasurementPage() {
   const originalForms = useMemo(() => formsFor(sale), [sale]);
   const geometryChanged = comparableMeasurements(measurements) !== comparableMeasurements(originalForms);
   const metadataChanged = sale ? JSON.stringify(metadata) !== JSON.stringify(metadataFor(sale)) : false;
-  const locked = busy || conflict || Boolean(unknownRequest) || !editable(sale);
+  const locked = busy || preparing || conflict || Boolean(unknownRequest) || !editable(sale);
   const changeLine = (index, key, value) => {
     if (locked || review) return;
     setMeasurements(previous => changeMeasurementForms(sale.pos_details.cart, previous, index, key, value));
@@ -455,7 +459,7 @@ export default function SaleMeasurementPage() {
   };
   if (loading) return <div className={card} role="status">Sipariş ve ölçü bilgileri yükleniyor…</div>;
   if (!sale) return <div className={`${card} space-y-4`}>
-    <h1 className="text-2xl font-bold">Ölçü alınacak / Ölçü bilgileri</h1>
+    <h1 className="text-2xl font-bold">Ölçü ve üretim</h1>
     <p role="alert">{loadError || 'Sipariş bulunamadı.'}</p>
     <div className="flex flex-wrap gap-3">
       <button onClick={reload} disabled={busy} className={secondary}>Tekrar dene</button>
@@ -465,8 +469,8 @@ export default function SaleMeasurementPage() {
   return <div className="mx-auto max-w-6xl space-y-5 text-[#392b22]">
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h1 className="text-3xl font-bold">Ölçü alınacak / Ölçü bilgileri</h1>
-        <p className="mt-2 text-[#6f5843]">Ön ölçüyle alınan siparişe evdeki son ölçüleri girin. Ürün ve işçilik birim fiyatları aynı kalır.</p>
+        <h1 className="text-3xl font-bold">Ölçü ve üretim</h1>
+        <p className="mt-2 text-[#6f5843]">Ölçüyü kaydet, sorumluları seç ve aynı ekrandan üretime gönder.</p>
       </div>
       <Link to="/dashboard/sales" className={secondary}>Sipariş takibine dön</Link>
     </div>
@@ -497,6 +501,8 @@ export default function SaleMeasurementPage() {
       <button className={`${secondary} mt-4`} disabled={busy} onClick={checkResult}>{busy ? 'Kontrol ediliyor…' : 'Kaydın sonucunu kontrol et'}</button>
     </section>}
 
+    <details key={`${sale._id}:${revisionOf(sale)}:${sale.measurement_status}`} open={sale.measurement_status !== 'confirmed'} className="space-y-4 rounded-2xl border border-[#decdb7] p-4">
+    <summary className="cursor-pointer py-2 text-xl font-bold">{sale.measurement_status === 'confirmed' ? 'Kaydedilen ölçüleri gör / düzelt' : 'Ölçüleri gir / randevu belirle'}</summary>
     <section className={card}>
       <h2 className="text-xl font-bold">Ölçüyü alan kişi ve randevu</h2>
       <fieldset disabled={locked || Boolean(review)} className="mt-4 space-y-4">
@@ -585,22 +591,26 @@ export default function SaleMeasurementPage() {
       <p className="mt-5 text-xl font-bold">Sipariş toplamı: {money(sale.grand_total)} → {money(review.grand_total)}</p>
       <p className="mt-2">Usta: {metadata.measurement_master} · Ölçü tarihi: {date(metadata.measurement_date)}</p>{metadata.measurement_note && <p className="mt-2 whitespace-pre-wrap">Not: {metadata.measurement_note}</p>}<div className="mt-5 flex flex-wrap gap-3">
         <button className={secondary} disabled={locked} onClick={() => setReview(null)}>Ölçülere dön</button>
-        <button className={primary} disabled={locked} onClick={() => save('measurement')}>{busy ? 'Kaydediliyor…' : 'Teyit et ve yeni ölçüleri kaydet'}</button>
+        <button className={primary} disabled={locked} onClick={() => save('measurement')}>{busy ? 'Kaydediliyor…' : 'Ölçüleri kaydet'}</button>
       </div>
     </section>}
 
-    {sale.status === 'tamamlandi' && <section className={card}>
+    </details>
+    {sale.status === 'tamamlandi' && isProductionAdmin(currentUser) && <OrderProductionPreparation sale={sale} blocked={busy || conflict || Boolean(unknownRequest) || geometryChanged || metadataChanged || Boolean(review)} onBusyChange={setPreparing} />}
+
+    {sale.status === 'tamamlandi' && <details className={card}>
+      <summary className="cursor-pointer font-bold">Sipariş ve imalat PDF’leri</summary>
       <h2 className="text-xl font-bold">Kayıtlı siparişin güncel PDF’leri</h2>
       <p className="mt-2 text-[#6f5843]">Revizyon {revisionOf(sale)} · {statusLabel(sale.measurement_status)}. PDF’ler kayıtlı ölçüleri kullanır.{geometryChanged || metadataChanged ? ' Buradaki kaydedilmemiş değişiklikler PDF’ye yansımaz.' : ''}</p>
       <div className="mt-4 flex flex-wrap gap-3">
         <button className={secondary} disabled={busy || geometryChanged || metadataChanged || Boolean(unknownRequest) || conflict} onClick={() => print('customer')}>Müşteri sipariş kağıdı / PDF</button>
         {hasManufacturingItems(sale.pos_details?.cart) && <button className={secondary} disabled={busy || geometryChanged || metadataChanged || Boolean(unknownRequest) || conflict} onClick={() => print('manufacturing')}>İmalat planı / PDF</button>}
       </div>
-    </section>}
+    </details>}
 
-    <section className={card}>
-      <h2 className="mb-4 text-xl font-bold">Ölçü ve randevu geçmişi</h2>
+    <details className={card}>
+      <summary className="mb-4 cursor-pointer font-bold">Ölçü ve randevu geçmişi</summary>
       <RevisionHistory history={sale.measurement_history} />
-    </section>
+    </details>
   </div>;
 }

@@ -59,8 +59,10 @@ const DashboardPage = () => {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      <OrderAttentionPanel />
+      <h1 className="text-3xl font-bold text-[#392b22]">Bugün</h1>
       <VisitPlanner admin />
+      <details className="rounded-2xl border bg-white p-5"><summary className="cursor-pointer font-bold">Eksikler ve uyarılar</summary><div className="mt-4"><OrderAttentionPanel /></div></details>
+      <details className="rounded-2xl border bg-white p-5 space-y-5"><summary className="cursor-pointer font-bold">Satış ve stok özeti</summary>
       <div>
         <h1 className="text-2xl font-bold text-gray-800">
           Sisteme Hoş Geldiniz
@@ -249,6 +251,7 @@ const DashboardPage = () => {
           </div>
         </div>
       </div>
+      </details>
     </div>
   );
 };
