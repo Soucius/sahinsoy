@@ -11,6 +11,7 @@ import { ProductionError, productionLines, fingerprint, visibleOrder, applyJobCh
 import { enqueueReadyNotification, kickWhatsAppQueue } from '../libs/whatsappService.js';
 import { whatsappPhone } from '../libs/whatsappNotifications.js';
 import { captureSewingWork } from '../libs/cashPersonnel.js';
+import { preparationPreview, buildProductionPreparation } from '../libs/productionPreparation.js';
 const populate = query => query.populate({ path: 'sale_items.product', select: 'product_name product_category product_brand product_color variants', populate: [{ path: 'product_category', select: 'category_name' }, { path: 'product_brand', select: 'brand_name' }] });
 const saleFields = 'sale_items pos_details customer_name customer_phone delivery_date delivery_method status measurement_revision measurement_status production_guard';
 const id = value => { if (typeof value !== 'string' || !/^[a-f\d]{24}$/i.test(value)) throw new ProductionError('Kayıt numarası geçersiz.'); return value; };
@@ -117,6 +118,22 @@ export async function getCandidates(req, res) {
     res.json(sales.map(s => ({ _id: s._id, customer_name: s.customer_name, delivery_date: s.delivery_date, measurement_status: s.measurement_status, item_count: s.sale_items.length })));
   } catch (error) { fail(res, error); }
 }
+export async function getProductionPreparation(req, res) {
+  try {
+    if (req.productionActor.kind !== 'admin') throw new ProductionError('Üretim hazırlığı yalnız mağaza yöneticisine açıktır.', 403);
+    const sale = await populate(Sale.findById(id(req.params.saleId)).select(saleFields)).lean();
+    if (!sale) throw new ProductionError('Sipariş bulunamadı.', 404);
+    const [record, staff] = await Promise.all([
+      ProductionOrder.findOne({ sale: sale._id }).lean(),
+      ProductionStaff.find({ active: true }).select('name duties active').sort({ name: 1 }).lean(),
+    ]);
+    res.set('Cache-Control', 'no-store');
+    res.json({ ...preparationPreview(sale, record), sale_status: sale.status, measurement_status: sale.measurement_status,
+      order: record ? present(record, sale, req.productionActor) : null,
+      staff: staff.map(person => ({ _id: String(person._id), name: person.name, duties: person.duties, active: person.active })),
+    });
+  } catch (error) { fail(res, error); }
+}
 const audit = (actor, action, line_id = '', before = null, after = null) => ({ at: new Date(), actor_id: actor._id, actor_name: actor.name, actor_kind: actor.kind, action, line_id, before, after });
 async function transaction(work) {
   const session = await mongoose.startSession();
@@ -129,6 +146,34 @@ async function lockedSale(saleId, session) {
   // Lock the sale document without changing its financial report / approval fallback date.
   await Sale.updateOne({ _id: sale._id }, { $inc: { production_guard: 1 } }, { session, timestamps: false });
   return sale;
+}
+export async function saveProductionPreparation(req, res) {
+  try {
+    if (req.productionActor.kind !== 'admin') throw new ProductionError('Üretim hazırlığı yalnız mağaza yöneticisine açıktır.', 403);
+    const result = await transaction(async session => {
+      const sale = await lockedSale(id(req.params.saleId), session);
+      const record = await ProductionOrder.findOne({ sale: sale._id }).session(session).lean();
+      const staff = await ProductionStaff.find({ active: true }).select('duties active').session(session).lean();
+      const plan = buildProductionPreparation(sale, record, req.body, staff);
+      if (plan.existing) return present(record, sale, req.productionActor);
+      const history = audit(req.productionActor, 'Sipariş ekranından üretim hazırlığı kaydedildi', '',
+        record ? { jobs: record.jobs } : null,
+        { preparation_request: plan.receipt, cutting: req.body.cutting, sewing: req.body.sewing, installation: req.body.installation });
+      const data = { source_fingerprint: plan.source_fingerprint, jobs: plan.jobs, sewing_default: plan.sewing_default };
+      let updated;
+      if (record) {
+        updated = await ProductionOrder.findOneAndUpdate({ _id: record._id, revision: record.revision },
+          { $set: data, $inc: { revision: 1 }, $push: { history } }, { new: true, session, runValidators: true }).lean();
+        if (!updated) throw new ProductionError('Üretim bilgileri değişti. Son bilgileri yükleyin.', 409);
+      } else {
+        const [created] = await ProductionOrder.create([{ sale: sale._id, ...data, history: [history] }], { session });
+        updated = created.toObject();
+      }
+      if (record) await enqueueReadyNotification(record, updated, sale, session);
+      return present(updated, sale, req.productionActor);
+    });
+    res.json(result);
+  } catch (error) { fail(res, error); }
 }
 export async function createProductionOrder(req, res) {
   try {
